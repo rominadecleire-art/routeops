@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RouteOps</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/tabler-icons.min.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="phone">
+  <div class="sbar">
+    <span class="sbar-time" id="clk">9:41</span>
+    <div class="si-icons"><i class="ti ti-wifi"></i><i class="ti ti-battery-3"></i></div>
+  </div>
+  <div class="toast tok" id="toast"><i class="ti ti-check" id="t-ico"></i><span id="t-msg"></span></div>
+
+  <!-- ══ HOME ══ -->
+  <div class="screen active" id="scr-home">
+    <div class="home-hdr">
+      <div>
+        <div class="home-g">Buenos días 👋</div>
+        <div class="home-n">Juan López</div>
+        <div class="home-d" id="hdt"></div>
+      </div>
+      <button class="back" onclick="go('scr-settings')" title="Configuración">
+        <i class="ti ti-settings"></i>
+      </button>
+    </div>
+    <div class="scrl">
+      <div class="hero" onclick="go('scr-map')">
+        <div class="hero-badge"><div class="hero-dot"></div>Ruta activa</div>
+        <div class="hero-title" id="htitle">Sin ruta cargada</div>
+        <div class="hero-sub" id="hsub">Creá una nueva ruta para comenzar</div>
+        <div class="hero-stats">
+          <div><div class="hs-v" id="hd">0</div><div class="hs-l">completadas</div></div>
+          <div><div class="hs-v" id="ht">0</div><div class="hs-l">paradas</div></div>
+          <div><div class="hs-v" id="hkm">—</div><div class="hs-l">km real</div></div>
+          <div><div class="hs-v" id="hmin">—</div><div class="hs-l">minutos</div></div>
+        </div>
+        <div class="hero-bar"><div class="hero-fill" id="hbar" style="width:0%"></div></div>
+        <div class="hero-row"><span id="hbarl">0 de 0</span><span id="hpct">0%</span></div>
+      </div>
+      <div class="arow">
+        <button class="ab ab-green" onclick="go('scr-map')"><i class="ti ti-map"></i><span>Mapa</span></button>
+        <button class="ab ab-blue" onclick="startWizard()"><i class="ti ti-plus"></i><span>Nueva ruta</span></button>
+        <button class="ab ab-slate" onclick="go('scr-stops')"><i class="ti ti-list-check"></i><span>Paradas</span></button>
+      </div>
+      <div class="sec">Próxima parada</div>
+      <div id="hnext"></div>
+      <div class="sec" style="margin-top:12px">En cola</div>
+      <div id="hqueue"></div>
+    </div>
+    <div class="tbar">
+      <div class="ti act" onclick="go('scr-home')"><i class="ti ti-home-2"></i><span>Inicio</span></div>
+      <div class="ti" onclick="go('scr-stops')"><i class="ti ti-list-check"></i><span>Paradas</span></div>
+      <div class="ti" onclick="go('scr-map')"><i class="ti ti-map"></i><span>Mapa</span></div>
+      <div class="ti" onclick="startWizard()"><i class="ti ti-plus"></i><span>Nueva</span></div>
+    </div>
+  </div>
+
+  <!-- ══ STOPS ══ -->
+  <div class="screen" id="scr-stops">
+    <div class="hdr">
+      <button class="back" onclick="go('scr-home')"><i class="ti ti-arrow-left"></i></button>
+      <div><div class="hdr-t" id="st-title">Paradas</div><div class="hdr-s" id="st-sub">—</div></div>
+    </div>
+    <div class="scrl"><div id="sl"></div></div>
+    <div class="tbar">
+      <div class="ti" onclick="go('scr-home')"><i class="ti ti-home-2"></i><span>Inicio</span></div>
+      <div class="ti act"><i class="ti ti-list-check"></i><span>Paradas</span></div>
+      <div class="ti" onclick="go('scr-map')"><i class="ti ti-map"></i><span>Mapa</span></div>
+      <div class="ti" onclick="startWizard()"><i class="ti ti-plus"></i><span>Nueva</span></div>
+    </div>
+  </div>
+
+  <!-- ══ MAP ══ -->
+  <div class="screen" id="scr-map">
+    <div class="hdr">
+      <button class="back" onclick="go('scr-home')"><i class="ti ti-arrow-left"></i></button>
+      <div><div class="hdr-t">Mapa de ruta</div><div class="hdr-s" id="map-sub">—</div></div>
+      <button class="back" style="margin-left:auto;background:#162842" onclick="fitRoute()">
+        <i class="ti ti-zoom-fit-page" style="color:#60a5fa"></i>
+      </button>
+    </div>
+    <div id="map-wrap">
+      <div id="lmap"></div>
+      <div class="map-card">
+        <div class="mnc">
+          <div class="mnc-lbl">Próxima parada</div>
+          <div class="mnc-name" id="mn-name">—</div>
+          <div class="mnc-addr" id="mn-addr">Creá una ruta para comenzar</div>
+          <div class="mnc-meta" id="mn-meta"></div>
+          <div class="mnc-btns">
+            <button class="mnc-btn mb-nav" onclick="navNext()"><i class="ti ti-navigation"></i>Navegar</button>
+            <button class="mnc-btn mb-ok" onclick="doneNext()"><i class="ti ti-check"></i>Entregado</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="tbar">
+      <div class="ti" onclick="go('scr-home')"><i class="ti ti-home-2"></i><span>Inicio</span></div>
+      <div class="ti" onclick="go('scr-stops')"><i class="ti ti-list-check"></i><span>Paradas</span></div>
+      <div class="ti act"><i class="ti ti-map"></i><span>Mapa</span></div>
+      <div class="ti" onclick="startWizard()"><i class="ti ti-plus"></i><span>Nueva</span></div>
+    </div>
+  </div>
+
+  <!-- ══ DETAIL ══ -->
+  <div class="screen" id="scr-detail">
+    <div class="hdr">
+      <button class="back" onclick="go('scr-stops')"><i class="ti ti-arrow-left"></i></button>
+      <div><div class="hdr-t" id="d-name">—</div><div class="hdr-s" id="d-num">—</div></div>
+    </div>
+    <div class="det-scrl">
+      <div class="mmap-wrap"><div id="mmaplf"></div></div>
+      <div class="dcard">
+        <div class="dlbl">Dirección</div>
+        <div class="dval" id="d-addr">—</div>
+        <div class="dval2" id="d-coords">—</div>
+      </div>
+      <div class="dcard">
+        <div class="drow"><i class="ti ti-route dico"></i><div><div class="dtxt" id="d-dist">—</div><div class="dtxt2">Distancia real por ruta (OSRM)</div></div></div>
+        <div class="drow"><i class="ti ti-clock dico"></i><div><div class="dtxt" id="d-dur">—</div><div class="dtxt2">Duración estimada del tramo</div></div></div>
+        <div class="drow"><i class="ti ti-clock-2 dico"></i><div><div class="dtxt" id="d-eta">—</div><div class="dtxt2">Tiempo acumulado desde salida</div></div></div>
+        <div class="drow"><i class="ti ti-hash dico"></i><div><div class="dtxt" id="d-ord">—</div></div></div>
+      </div>
+      <button class="navbtn" onclick="navDetail()"><i class="ti ti-navigation"></i> Navegar con Google Maps</button>
+      <div class="stbtns">
+        <button class="stb" id="b-ok" onclick="detOk()"><i class="ti ti-circle-check"></i>Entregado</button>
+        <button class="stb" id="b-fail" onclick="detFail()"><i class="ti ti-circle-x"></i>No entregado</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ WIZARD ══ -->
+  <div class="screen" id="scr-wizard">
+    <div class="hdr">
+      <button class="back" onclick="go('scr-home')"><i class="ti ti-arrow-left"></i></button>
+      <div class="hdr-t" id="wiz-hdr">Nueva ruta</div>
+    </div>
+
+    <!-- STEP 1: Punto de partida -->
+    <div class="wiz" id="ws1">
+      <div class="wdots">
+        <div class="wdot act" id="dot1"></div>
+        <div class="wdot" id="dot2"></div>
+        <div class="wdot" id="dot3"></div>
+      </div>
+      <div class="wiz-t">¿Desde dónde salís?</div>
+      <div class="wiz-s">El algoritmo ordena las paradas desde este punto para el recorrido más corto.</div>
+
+      <div class="po-card">
+        <div class="po-lbl">Tipo de punto de partida</div>
+        <div class="po-opt sel" id="opt-saved" onclick="selPart('saved')">
+          <div class="po-radio on" id="r-saved"></div>
+          <i class="ti ti-building-warehouse po-ico" style="color:#f59e0b"></i>
+          <div>
+            <div class="po-name">Punto guardado</div>
+            <div class="po-desc">Depósitos y domicilios habituales</div>
+          </div>
+        </div>
+        <div class="po-opt" id="opt-manual" onclick="selPart('manual')">
+          <div class="po-radio" id="r-manual"></div>
+          <i class="ti ti-map-pin po-ico" style="color:#60a5fa"></i>
+          <div>
+            <div class="po-name">Escribir dirección</div>
+            <div class="po-desc">Cualquier ciudad o provincia</div>
+          </div>
+        </div>
+        <div class="po-opt" id="opt-gps" onclick="selPart('gps')">
+          <div class="po-radio" id="r-gps"></div>
+          <i class="ti ti-current-location po-ico" style="color:#34d399"></i>
+          <div>
+            <div class="po-name">Mi ubicación GPS</div>
+            <div class="po-desc">Usa la posición del teléfono</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Panel Saved -->
+      <div id="pan-saved">
+        <div class="sec" style="margin-top:0">Puntos habituales</div>
+        <div class="chips" id="saved-chips"></div>
+      </div>
+
+      <!-- Panel Manual -->
+      <div id="pan-manual" style="display:none">
+        <div class="field">
+          <div class="field-lbl">Dirección de salida</div>
+          <div class="dep-inp-row">
+            <input class="finp" type="text" id="dep-inp"
+              placeholder="Ej: Rivadavia 300, Rosario, Santa Fe"
+              oninput="onDepInput(this.value)"
+              onkeydown="if(event.key==='Enter'){event.preventDefault();confirmDepInp()}">
+            <button class="dep-srch-btn" onclick="confirmDepInp()" title="Buscar dirección">
+              <i class="ti ti-search"></i>
+            </button>
+          </div>
+          <div class="sug-box" id="dep-sug"></div>
+          <div id="dep-status" class="dep-status"></div>
+          <div id="dep-fallback" style="display:none"></div>
+        </div>
+      </div>
+
+      <!-- Panel GPS -->
+      <div id="pan-gps" style="display:none">
+        <button class="loc-btn" onclick="getGPS()">
+          <i class="ti ti-current-location"></i> Detectar mi ubicación GPS
+        </button>
+        <div id="gps-txt" style="font-size:12px;color:#555;text-align:center;min-height:16px"></div>
+      </div>
+
+      <!-- Confirmed -->
+      <div class="cbox" id="dep-ok">
+        <div class="cbox-lbl">✓ Punto de partida confirmado</div>
+        <div class="cbox-name" id="dep-ok-name">—</div>
+        <div class="cbox-addr" id="dep-ok-addr">—</div>
+        <div class="cbox-coords" id="dep-ok-coords">—</div>
+      </div>
+
+      <button class="bbtn bbtn-g" onclick="goStep2()">
+        <i class="ti ti-arrow-right"></i> Continuar a paradas
+      </button>
+    </div>
+
+    <!-- STEP 2: Cargar paradas -->
+    <div class="wiz" id="ws2" style="display:none">
+      <div class="wdots">
+        <div class="wdot"></div>
+        <div class="wdot act"></div>
+        <div class="wdot"></div>
+      </div>
+      <div class="wiz-t">Cargá las paradas</div>
+      <div class="wiz-s">Elegí cómo querés ingresar las direcciones. Podés combinar los tres métodos.</div>
+
+      <div class="method-tabs">
+        <button class="mtab act" id="tab-pdf" onclick="switchMethod('pdf')">
+          <i class="ti ti-file-type-pdf"></i><span>PDF</span>
+        </button>
+        <button class="mtab" id="tab-audio" onclick="switchMethod('audio')">
+          <i class="ti ti-microphone"></i><span>Audio</span>
+        </button>
+        <button class="mtab" id="tab-text" onclick="switchMethod('text')">
+          <i class="ti ti-pencil"></i><span>Texto</span>
+        </button>
+      </div>
+
+      <!-- PANEL PDF -->
+      <div id="mpanel-pdf">
+        <div class="dz" id="dz" ondragover="dzOv(event)" ondragleave="dzLv()" ondrop="dzDp(event)">
+          <input type="file" accept=".pdf" onchange="pdfIn(event)" id="fi">
+          <div class="dz-ico"><i class="ti ti-file-type-pdf"></i></div>
+          <div class="dz-t">Subí la hoja de ruta</div>
+          <div class="dz-s">El servidor extrae el texto del PDF con pdfplumber</div>
+          <div class="dz-pill"><i class="ti ti-server" style="font-size:11px"></i> Backend Python</div>
+        </div>
+        <div class="pdf-ready" id="pdf-ready">
+          <i class="ti ti-file-type-pdf" style="font-size:18px"></i>
+          <span id="pdf-name">PDF listo</span>
+          <button onclick="clearPDF()" style="margin-left:auto;background:none;border:none;color:#60a5fa;cursor:pointer;font-size:12px">✕ Quitar</button>
+        </div>
+      </div>
+
+      <!-- PANEL AUDIO -->
+      <div id="mpanel-audio" style="display:none">
+        <div class="audio-card">
+          <div class="audio-hint">
+            Hablá despacio y mencioná una dirección por vez.<br>
+            Ej: <em>"Rivadavia 567 Venado Tuerto, Belgrano 900..."</em>
+          </div>
+          <button class="mic-btn" id="mic-btn" onclick="toggleMic()">
+            <div class="mic-pulse" id="mic-pulse"></div>
+            <i class="ti ti-microphone" id="mic-ico"></i>
+          </button>
+          <div class="mic-label" id="mic-label">Tocá para hablar</div>
+          <div class="mic-interim" id="mic-interim"></div>
+        </div>
+        <div class="audio-result" id="audio-result" style="display:none">
+          <div class="audio-result-lbl">Texto transcripto</div>
+          <div class="audio-result-txt" id="audio-txt"></div>
+          <div style="display:flex;gap:8px;margin-top:10px">
+            <button class="bbtn bbtn-g" style="margin:0;flex:1;padding:11px;font-size:13px" onclick="useAudioText()">
+              <i class="ti ti-check"></i> Usar este texto
+            </button>
+            <button class="bbtn bbtn-d" style="margin:0;padding:11px;font-size:13px" onclick="clearAudio()">
+              <i class="ti ti-refresh"></i>
+            </button>
+          </div>
+        </div>
+        <div class="audio-no-support" id="audio-no-support" style="display:none">
+          <i class="ti ti-alert-triangle" style="font-size:20px;color:#f59e0b"></i>
+          <div style="font-size:12px;color:#9ca3af">
+            Tu navegador no soporta reconocimiento de voz.<br>
+            Usá Chrome en Android o iOS para esta función.
+          </div>
+        </div>
+      </div>
+
+      <!-- PANEL TEXTO -->
+      <div id="mpanel-text" style="display:none">
+        <div class="mbox">
+          <textarea id="mtxt" placeholder="Escribí o pegá las direcciones, una por línea:&#10;&#10;Rivadavia 567, Venado Tuerto&#10;Belgrano 900, Venado Tuerto&#10;Corrientes 1234, Rosario..."></textarea>
+        </div>
+      </div>
+
+      <!-- AGREGAR INDIVIDUAL (siempre visible) -->
+      <div class="sep-line"></div>
+      <div class="sec" style="margin-top:0">Agregar parada individual</div>
+      <div class="add-row">
+        <input type="text" id="add-addr"
+          placeholder="Ej: San Martín 850, Venado Tuerto"
+          onkeydown="if(event.key==='Enter')addManual()">
+        <button class="add-btn" onclick="addManual()"><i class="ti ti-plus"></i>+</button>
+      </div>
+      <div class="add-preview" id="ap"></div>
+
+      <div class="osrm-info" style="margin-top:10px">
+        <i class="ti ti-route"></i>
+        <span><strong>Distancias reales por calles</strong> — OSRM calcula km y minutos reales, no en línea recta.</span>
+      </div>
+
+      <button class="bbtn bbtn-g" onclick="goStep3()">
+        <i class="ti ti-sparkles"></i> Optimizar ruta
+      </button>
+      <button class="bbtn bbtn-d" onclick="runDemo()">
+        <i class="ti ti-player-play"></i> Demo Venado Tuerto
+      </button>
+    </div>
+
+    <!-- STEP 3: Processing + Results -->
+    <div class="wiz" id="ws3" style="display:none">
+      <div class="wdots">
+        <div class="wdot"></div>
+        <div class="wdot"></div>
+        <div class="wdot act"></div>
+      </div>
+      <div class="wiz-t" id="ws3-t">Optimizando...</div>
+      <div class="wiz-s" id="ws3-s">Calculando el recorrido más corto por calles reales</div>
+
+      <div class="proc-wrap" id="proc-wrap">
+        <div class="proc-ico"><i class="ti ti-loader spin"></i></div>
+        <div class="proc-t" id="p-ttl">Iniciando...</div>
+        <div class="proc-s" id="p-sub">Un momento</div>
+      </div>
+
+      <div class="steps-box" id="steps-box">
+        <div class="pstep"><div class="psico ico-w" id="i0"><i class="ti ti-home-2"></i></div><div><div class="pslbl">Punto de partida</div><div class="pssub" id="s0">Pendiente</div></div></div>
+        <div class="pstep"><div class="psico ico-w" id="i1"><i class="ti ti-file-text"></i></div><div><div class="pslbl">Extraer direcciones</div><div class="pssub" id="s1">Pendiente</div></div></div>
+        <div class="pstep"><div class="psico ico-w" id="i2"><i class="ti ti-world"></i></div><div><div class="pslbl">Geocodificar (OpenStreetMap)</div><div class="pssub" id="s2">Pendiente</div></div></div>
+        <div class="pstep"><div class="psico ico-w" id="i3"><i class="ti ti-calculator"></i></div><div><div class="pslbl">Matriz de distancias reales (OSRM)</div><div class="pssub" id="s3">Pendiente</div></div></div>
+        <div class="pstep"><div class="psico ico-w" id="i4"><i class="ti ti-route"></i></div><div><div class="pslbl">Nearest neighbor desde salida</div><div class="pssub" id="s4">Pendiente</div></div></div>
+        <div class="pstep"><div class="psico ico-w" id="i5"><i class="ti ti-cpu"></i></div><div><div class="pslbl">2-opt con distancias reales</div><div class="pssub" id="s5">Pendiente</div></div></div>
+        <div class="pstep"><div class="psico ico-w" id="i6"><i class="ti ti-map"></i></div><div><div class="pslbl">Trazar en mapa</div><div class="pssub" id="s6">Pendiente</div></div></div>
+      </div>
+
+      <!-- Validation -->
+      <div id="ws-val" style="display:none">
+        <div class="val-map-wrap"><div id="val-map"></div></div>
+        <div class="val-topbar">
+          <div id="val-summary" class="val-summary"></div>
+          <button class="back" style="background:#162842;flex-shrink:0" onclick="fitValMap()">
+            <i class="ti ti-zoom-fit-page" style="color:#60a5fa"></i>
+          </button>
+        </div>
+        <!-- Buttons ABOVE the list so they're always visible -->
+        <div class="val-actions">
+          <button class="bbtn bbtn-d val-act-back" onclick="cancelValidation()">
+            <i class="ti ti-arrow-left"></i>
+          </button>
+          <button class="bbtn bbtn-g val-act-ok" onclick="confirmValidation()">
+            <i class="ti ti-route"></i> Confirmar y optimizar
+          </button>
+        </div>
+        <div id="val-list"></div>
+      </div>
+
+      <!-- Results -->
+      <div id="wresults" style="display:none">
+        <div class="res-banner fadeup">
+          <div class="rb-ico"><i class="ti ti-circle-check"></i></div>
+          <div class="rb-t">¡Ruta optimizada!</div>
+          <div class="rb-s" id="r-sub">—</div>
+        </div>
+        <div class="rgrid">
+          <div class="rcard"><div class="rcard-v" id="r-stops">—</div><div class="rcard-l">paradas</div></div>
+          <div class="rcard"><div class="rcard-v g" id="r-km">—</div><div class="rcard-l">km real</div></div>
+          <div class="rcard"><div class="rcard-v b" id="r-min">—</div><div class="rcard-l">minutos</div></div>
+          <div class="rcard"><div class="rcard-v y" id="r-save">—</div><div class="rcard-l">km ahorr.</div></div>
+        </div>
+        <div class="ext-card">
+          <div class="ext-hd">Recorrido optimizado</div>
+          <div id="el"></div>
+        </div>
+        <button class="bbtn bbtn-g" onclick="confirmRoute()">
+          <i class="ti ti-check"></i> Confirmar y navegar
+        </button>
+        <button class="bbtn bbtn-d" onclick="startWizard()">
+          <i class="ti ti-refresh"></i> Nueva ruta
+        </button>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ══ SETTINGS ══ -->
+  <div class="screen" id="scr-settings">
+    <div class="hdr">
+      <button class="back" onclick="go('scr-home')"><i class="ti ti-arrow-left"></i></button>
+      <div><div class="hdr-t">Configuración</div></div>
+    </div>
+    <div class="scrl">
+      <div class="sec" style="margin-top:16px">Geocodificación</div>
+      <div class="cfg-card">
+        <div class="cfg-lbl"><i class="ti ti-key"></i> Google Maps API Key</div>
+        <div class="cfg-desc">Recomendado para ciudades pequeñas de Argentina. Sin clave se usa Nominatim como respaldo.</div>
+        <input class="finp" type="password" id="gmaps-key-inp"
+          placeholder="AIzaSy..."
+          autocomplete="off">
+        <div class="cfg-hint" id="gmaps-key-hint"></div>
+      </div>
+      <div class="cfg-card">
+        <div class="cfg-lbl"><i class="ti ti-map-pin-2"></i> Ciudad base</div>
+        <div class="cfg-desc">Se agrega automáticamente a las direcciones que no tienen ciudad al geocodificar.</div>
+        <input class="finp" type="text" id="city-inp"
+          placeholder="Ej: Venado Tuerto, Santa Fe, Argentina">
+        <div class="cfg-hint" id="city-hint"></div>
+      </div>
+      <button class="bbtn bbtn-g" style="margin-top:8px" onclick="saveSettings()">
+        <i class="ti ti-device-floppy"></i> Guardar
+      </button>
+    </div>
+  </div>
+
+
+  <!-- ══ PIN MODAL ══ -->
+  <div id="pin-modal" class="pin-modal" style="display:none">
+    <div class="hdr">
+      <button class="back" onclick="cancelPinPlacement()"><i class="ti ti-arrow-left"></i></button>
+      <div>
+        <div class="hdr-t" id="pin-modal-title">Ubicar parada</div>
+        <div class="hdr-s">Arrastrá el pin a la ubicación exacta</div>
+      </div>
+    </div>
+    <div class="pin-modal-map"><div id="pin-lmap"></div></div>
+    <div class="pin-modal-foot">
+      <button class="bbtn bbtn-g" style="margin:0" onclick="confirmPinPlacement()">
+        <i class="ti ti-check"></i> Confirmar ubicación
+      </button>
+    </div>
+  </div>
+
+</div><!-- /phone -->
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
