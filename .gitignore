@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+
+# Entornos virtuales
+venv/
+.venv/
+env/
+
+# Variables de entorno (nunca commitear claves)
+.env
+.env.local
+
+# Borradores
+routeops_final.html
+routeops_final_2.html
+
+# Sistema
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode/
+.idea/
