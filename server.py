@@ -132,12 +132,17 @@ def extract_pdf():
                     if page_text.strip():
                         text += page_text + '\n'
                 except Exception as page_err:
-                    log.error('  Página %d/%d falló: %s', i + 1, total_pages, page_err)
-                    log.debug(traceback.format_exc())
+                    tb = traceback.format_exc()
+                    log.error('  Página %d/%d falló: %s\n%s', i + 1, total_pages, page_err, tb)
 
     except Exception as e:
-        log.error('pdfplumber crash: %s\n%s', e, traceback.format_exc())
-        return jsonify({'error': f'No se pudo abrir el PDF: {str(e)}'}), 500
+        tb = traceback.format_exc()
+        log.error('pdfplumber crash: %s\n%s', e, tb)
+        return jsonify({
+            'error': f'No se pudo abrir el PDF: {str(e)}',
+            'exception_type': type(e).__name__,
+            'traceback': tb,
+        }), 500
 
     text_len = len(text.strip())
     log.info('pdfplumber resultado: %d chars totales', text_len)
@@ -166,11 +171,21 @@ def extract_pdf():
             log.info('Vision fallback OK: %d paradas', len(stops))
             return jsonify({'stops': stops, 'scanned': True})
         except json.JSONDecodeError as e:
-            log.error('Vision: JSON inválido — %s', e)
-            return jsonify({'error': 'Claude Vision no devolvió JSON válido para el PDF escaneado'}), 500
+            tb = traceback.format_exc()
+            log.error('Vision: JSON inválido — %s\n%s', e, tb)
+            return jsonify({
+                'error': 'Claude Vision no devolvió JSON válido',
+                'exception_type': 'JSONDecodeError',
+                'traceback': tb,
+            }), 500
         except Exception as e:
-            log.error('Vision fallback falló: %s\n%s', e, traceback.format_exc())
-            return jsonify({'error': f'Error en Vision fallback: {str(e)}'}), 500
+            tb = traceback.format_exc()
+            log.error('Vision fallback falló: %s\n%s', e, tb)
+            return jsonify({
+                'error': f'Error en Vision fallback: {str(e)}',
+                'exception_type': type(e).__name__,
+                'traceback': tb,
+            }), 500
 
     # ── 3. Parsear texto con Claude ────────────────────────────────────────────
     if client:
@@ -267,6 +282,90 @@ def extract_image():
     except Exception as e:
         log.error('extract-image falló: %s\n%s', e, traceback.format_exc())
         return jsonify({'error': str(e)}), 500
+
+
+# ── PDF diagnostic ────────────────────────────────────────────────────────────
+
+def _make_minimal_pdf():
+    """Build a valid single-page PDF with extractable text, computing xref offsets dynamically."""
+    stream = b"BT /F1 12 Tf 72 720 Td (Test RouteOps Rivadavia 600) Tj ET\n"
+
+    raw_objects = {
+        1: b"<</Type/Catalog/Pages 2 0 R>>",
+        2: b"<</Type/Pages/Kids[3 0 R]/Count 1>>",
+        3: b"<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>",
+        4: b"<</Length " + str(len(stream)).encode() + b">>\nstream\n" + stream + b"endstream",
+        5: b"<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>",
+    }
+
+    body = b"%PDF-1.4\n"
+    offsets = {}
+    for n in sorted(raw_objects):
+        offsets[n] = len(body)
+        body += f"{n} 0 obj\n".encode() + raw_objects[n] + b"\nendobj\n"
+
+    xref_pos = len(body)
+    count = max(raw_objects) + 1
+    xref = f"xref\n0 {count}\n0000000000 65535 f \n".encode()
+    for i in range(1, count):
+        xref += f"{offsets[i]:010d} 00000 n \n".encode()
+
+    trailer = f"trailer\n<</Size {count}/Root 1 0 R>>\nstartxref\n{xref_pos}\n%%EOF\n".encode()
+    return body + xref + trailer
+
+
+@app.route('/api/test-pdf')
+def test_pdf():
+    """Diagnostic endpoint — verifies pdfplumber is working end-to-end."""
+    results = []
+
+    # 1. Import check
+    try:
+        ver = pdfplumber.__version__
+        results.append({'test': 'pdfplumber_import', 'status': 'ok', 'version': ver})
+        log.info('test-pdf: pdfplumber v%s', ver)
+    except Exception as e:
+        results.append({'test': 'pdfplumber_import', 'status': 'fail',
+                        'error': str(e), 'traceback': traceback.format_exc()})
+        return jsonify({'results': results}), 500
+
+    # 2. Generate minimal PDF and try to open it
+    try:
+        pdf_bytes = _make_minimal_pdf()
+        results.append({'test': 'generate_pdf', 'status': 'ok', 'size_bytes': len(pdf_bytes)})
+        log.info('test-pdf: PDF minimal generado (%d bytes)', len(pdf_bytes))
+    except Exception as e:
+        results.append({'test': 'generate_pdf', 'status': 'fail',
+                        'error': str(e), 'traceback': traceback.format_exc()})
+        return jsonify({'results': results}), 500
+
+    # 3. Open with pdfplumber and extract text
+    try:
+        with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+            pages = len(pdf.pages)
+            text = pdf.pages[0].extract_text() or ''
+        results.append({
+            'test': 'extract_text', 'status': 'ok',
+            'pages': pages, 'extracted_text': text,
+        })
+        log.info('test-pdf: extract_text OK — %r', text)
+    except Exception as e:
+        tb = traceback.format_exc()
+        log.error('test-pdf: extract_text FAIL — %s\n%s', e, tb)
+        results.append({'test': 'extract_text', 'status': 'fail',
+                        'error': str(e), 'exception_type': type(e).__name__,
+                        'traceback': tb})
+        return jsonify({'results': results}), 500
+
+    # 4. PyMuPDF check (optional)
+    try:
+        import fitz
+        results.append({'test': 'pymupdf_import', 'status': 'ok', 'version': fitz.version[0]})
+    except ImportError:
+        results.append({'test': 'pymupdf_import', 'status': 'not_installed',
+                        'note': 'Necesario solo para PDFs escaneados'})
+
+    return jsonify({'results': results, 'overall': 'ok'})
 
 
 # ── Health check ───────────────────────────────────────────────────────────────
