@@ -742,8 +742,8 @@ async function runOptimization(txt, demoStops) {
       stops = await extractPDFStops(pendingPDF);
       step(1, 'ok', stops.length + ' paradas extraídas del PDF');
     } catch(e) {
-      step(1, 'er', 'Error procesando el PDF');
-      showToast('Error al procesar el PDF: ' + e.message, 'err');
+      step(1, 'er', e.message);
+      showToast(e.message, 'err');
       return;
     }
   } else if (pendingImages.length) {
@@ -973,6 +973,9 @@ async function extractPDFStops(file) {
 
   if (!resp.ok) {
     var err = await resp.json().catch(function() { return {}; });
+    if (err.traceback) {
+      console.error('[RouteOps] PDF server error — ' + (err.exception_type || 'Error') + '\n' + err.traceback);
+    }
     throw new Error(err.error || 'Error del servidor (' + resp.status + ')');
   }
 

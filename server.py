@@ -23,11 +23,36 @@ app = Flask(__name__)
 CORS(app)
 
 CLAUDE_MODEL = 'claude-sonnet-4-6'
+
 ADDRESS_PROMPT = (
     'Extraé TODAS las direcciones de entrega. '
     'Devolvé SOLO JSON sin texto extra:\n'
     '{"stops":[{"name":"Nombre cliente","address":"Dirección completa, Ciudad, Provincia, Argentina"}]}\n'
     'Si no tiene ciudad, usá "Venado Tuerto, Santa Fe, Argentina".'
+)
+
+# Prompt especializado para hojas de ruta escaneadas con columnas Destinatario/Domicilio
+SCANNED_PDF_PROMPT = (
+    'Esta imagen es una página de una hoja de ruta de reparto.\n'
+    'Analizá la tabla y extraé cada fila con datos de entrega.\n'
+    '\n'
+    'Las columnas pueden llamarse:\n'
+    '  • Destinatario / Cliente / Nombre / Receptor\n'
+    '  • Domicilio / Dirección / Calle / Entrega\n'
+    '  • Localidad / Ciudad / Partido / Zona\n'
+    '\n'
+    'Por cada fila con datos, generá una entrada con:\n'
+    '  - name: el contenido de la columna Destinatario/Cliente/Nombre\n'
+    '  - address: Calle Número, Localidad, Provincia, Argentina\n'
+    '\n'
+    'Devolvé SOLO este JSON, sin texto extra, sin markdown:\n'
+    '{"stops":[{"name":"Nombre destinatario","address":"Calle Número, Localidad, Provincia, Argentina"}]}\n'
+    '\n'
+    'Reglas:\n'
+    '- Si una fila no tiene localidad, usá la localidad más repetida en la página.\n'
+    '- Si hay Piso/Depto, incluilo en la dirección.\n'
+    '- Omití filas vacías y encabezados de columna.\n'
+    '- Si la página no tiene datos de entrega, devolvé: {"stops":[]}'
 )
 
 
@@ -68,36 +93,58 @@ def _pdf_to_page_images(pdf_bytes, max_pages=10):
     log.info('PyMuPDF: renderizando %d de %d páginas', n, len(doc))
     images = []
     for i in range(n):
-        pix = doc[i].get_pixmap(matrix=fitz.Matrix(2.0, 2.0))  # 2× para mejor OCR
+        pix = doc[i].get_pixmap(matrix=fitz.Matrix(3.0, 3.0))  # 3× para mejor OCR en tablas escaneadas
         images.append(pix.tobytes('png'))
         log.info('  Página %d: %dx%d px, %d bytes PNG', i + 1, pix.width, pix.height, len(images[-1]))
     doc.close()
     return images
 
 
-def _parse_stops_from_images(client, page_images):
-    """Call Claude Vision with rendered PDF page images. Returns list or raises."""
-    log.info('Claude Vision — enviando %d imagen(es)', len(page_images))
-    content = []
+def _parse_scanned_pdf_page_by_page(client, page_images):
+    """Process each PDF page individually with Claude Vision. Combines and deduplicates results."""
+    all_stops = []
+
     for i, img_bytes in enumerate(page_images):
+        log.info('Vision — página %d/%d (%d bytes PNG)', i + 1, len(page_images), len(img_bytes))
         b64 = base64.standard_b64encode(img_bytes).decode('utf-8')
-        content.append({
-            'type': 'image',
-            'source': {'type': 'base64', 'media_type': 'image/png', 'data': b64},
-        })
-        log.info('  Imagen %d: %d bytes base64', i + 1, len(b64))
-    content.append({
-        'type': 'text',
-        'text': ADDRESS_PROMPT + '\nEsta es la hoja de ruta escaneada.',
-    })
-    response = client.messages.create(
-        model=CLAUDE_MODEL,
-        max_tokens=2000,
-        messages=[{'role': 'user', 'content': content}],
-    )
-    raw = response.content[0].text.strip().replace('```json', '').replace('```', '').strip()
-    log.info('Claude Vision — respuesta: %s', raw[:300])
-    return json.loads(raw).get('stops', [])
+
+        try:
+            response = client.messages.create(
+                model=CLAUDE_MODEL,
+                max_tokens=2000,
+                messages=[{
+                    'role': 'user',
+                    'content': [
+                        {
+                            'type': 'image',
+                            'source': {'type': 'base64', 'media_type': 'image/png', 'data': b64},
+                        },
+                        {'type': 'text', 'text': SCANNED_PDF_PROMPT},
+                    ],
+                }],
+            )
+            raw = response.content[0].text.strip().replace('```json', '').replace('```', '').strip()
+            log.info('  Página %d respuesta: %s', i + 1, raw[:300])
+            page_stops = json.loads(raw).get('stops', [])
+            log.info('  Página %d: %d parada(s) encontrada(s)', i + 1, len(page_stops))
+            all_stops.extend(page_stops)
+        except json.JSONDecodeError as e:
+            log.error('  Página %d: JSON inválido — %s', i + 1, e)
+        except Exception as e:
+            log.error('  Página %d: error — %s\n%s', i + 1, e, traceback.format_exc())
+
+    # Deduplicate by normalized address across all pages
+    seen = set()
+    unique = []
+    for s in all_stops:
+        key = (s.get('address') or '').lower().strip()
+        if key and key not in seen:
+            seen.add(key)
+            unique.append(s)
+
+    log.info('Vision total: %d paradas únicas (de %d en %d páginas)',
+             len(unique), len(all_stops), len(page_images))
+    return unique
 
 
 # ── PDF extraction ─────────────────────────────────────────────────────────────
@@ -167,25 +214,27 @@ def extract_pdf():
             }), 400
 
         try:
-            stops = _parse_stops_from_images(client, page_images)
-            log.info('Vision fallback OK: %d paradas', len(stops))
-            return jsonify({'stops': stops, 'scanned': True})
-        except json.JSONDecodeError as e:
-            tb = traceback.format_exc()
-            log.error('Vision: JSON inválido — %s\n%s', e, tb)
-            return jsonify({
-                'error': 'Claude Vision no devolvió JSON válido',
-                'exception_type': 'JSONDecodeError',
-                'traceback': tb,
-            }), 500
+            stops = _parse_scanned_pdf_page_by_page(client, page_images)
         except Exception as e:
             tb = traceback.format_exc()
-            log.error('Vision fallback falló: %s\n%s', e, tb)
+            log.error('Vision falló: %s\n%s', e, tb)
             return jsonify({
-                'error': f'Error en Vision fallback: {str(e)}',
+                'error': f'Error procesando PDF escaneado con Vision: {str(e)}',
                 'exception_type': type(e).__name__,
                 'traceback': tb,
             }), 500
+
+        if not stops:
+            log.warning('Vision procesó %d página(s) pero no encontró paradas', len(page_images))
+            return jsonify({
+                'error': (
+                    f'Claude Vision analizó {len(page_images)} página(s) pero no encontró direcciones. '
+                    'Verificá que el PDF tenga columnas Destinatario/Domicilio visibles.'
+                )
+            }), 422
+
+        log.info('Vision OK: %d paradas en %d páginas', len(stops), len(page_images))
+        return jsonify({'stops': stops, 'scanned': True, 'pages_processed': len(page_images)})
 
     # ── 3. Parsear texto con Claude ────────────────────────────────────────────
     if client:
