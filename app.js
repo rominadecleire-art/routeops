@@ -93,7 +93,7 @@ var currentMethod = 'pdf';
 var manualQueue = [];
 var pendingPDF = null;
 var detIdx = -1;
-var mainMap = null, miniMap = null, routePoly = null, mapMarkers = [];
+var mainMap = null, miniMap = null, routePolys = [], mapMarkers = [];
 var distMatrix = [], durMatrix = [];
 var pendingImages = [];
 
@@ -563,22 +563,47 @@ function switchMethod(m) {
 }
 
 // ════════════════════════════════════════
-// AUDIO — Web Speech API
+// AUDIO — Web Speech API + MediaRecorder fallback
 // ════════════════════════════════════════
 var recognition = null;
 var isRecording = false;
 var audioTranscript = '';
 var processedResultsCount = 0;
 
+var mediaRecorder = null;
+var recChunks = [];
+var isRecordingAudio = false;
+
+function isIOS() {
+  return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+         (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
 function initAudio() {
   var noSupport = document.getElementById('audio-no-support');
-  var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SpeechRecognition) {
-    if (noSupport) noSupport.style.display = 'flex';
-    var micBtn = document.getElementById('mic-btn');
-    if (micBtn) micBtn.style.display = 'none';
+  var wsDiv    = document.getElementById('ws-audio');
+  var iosDiv   = document.getElementById('ios-recorder');
+
+  // iOS Safari: Web Speech unreliable (no continuous mode) → use MediaRecorder
+  if (isIOS()) {
+    if (wsDiv)  wsDiv.style.display  = 'none';
+    if (iosDiv) iosDiv.style.display = 'block';
     return;
   }
+
+  var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    // Check if MediaRecorder is available as a fallback
+    if (window.MediaRecorder) {
+      if (wsDiv)  wsDiv.style.display  = 'none';
+      if (iosDiv) iosDiv.style.display = 'block';
+    } else {
+      if (noSupport) noSupport.style.display = 'flex';
+      if (wsDiv)  wsDiv.style.display  = 'none';
+    }
+    return;
+  }
+
   if (recognition) return;
 
   recognition = new SpeechRecognition();
@@ -613,7 +638,9 @@ function initAudio() {
     var btn = document.getElementById('mic-btn');
     if (btn) btn.classList.remove('recording');
     if (e.error === 'not-allowed') {
-      showToast('Permiso de micrófono denegado', 'err');
+      showToast('Permiso de micrófono denegado. Habilitalo en Configuración.', 'err');
+    } else if (e.error === 'network') {
+      showToast('Error de red al reconocer voz. Verificá la conexión.', 'err');
     } else if (e.error !== 'no-speech') {
       showToast('Error de reconocimiento: ' + e.error, 'err');
     }
@@ -637,7 +664,18 @@ function initAudio() {
   };
 }
 
-function toggleMic() {
+async function requestMicPermission() {
+  try {
+    var stream = await navigator.mediaDevices.getUserMedia({audio: true});
+    stream.getTracks().forEach(function(t) { t.stop(); });
+    return true;
+  } catch(e) {
+    showToast('Permiso de micrófono denegado. Habilitalo en Configuración del sistema.', 'err');
+    return false;
+  }
+}
+
+async function toggleMic() {
   if (!recognition) {
     initAudio();
     if (!recognition) return;
@@ -645,6 +683,8 @@ function toggleMic() {
   if (isRecording) {
     recognition.stop();
   } else {
+    var ok = await requestMicPermission();
+    if (!ok) return;
     audioTranscript = '';
     processedResultsCount = 0;
     document.getElementById('mic-interim').textContent = '';
@@ -657,6 +697,82 @@ function toggleMic() {
       setTimeout(function() { recognition.start(); }, 300);
     }
   }
+}
+
+// ── MediaRecorder fallback (iOS Safari / Firefox) ──────────────────────────────
+
+async function toggleRecorder() {
+  if (isRecordingAudio) {
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+    return;
+  }
+
+  var ok = await requestMicPermission();
+  if (!ok) return;
+
+  var mimeType = '';
+  if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) mimeType = 'audio/webm;codecs=opus';
+  else if (MediaRecorder.isTypeSupported('audio/mp4')) mimeType = 'audio/mp4';
+  else if (MediaRecorder.isTypeSupported('audio/ogg')) mimeType = 'audio/ogg';
+
+  var stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({audio: {channelCount:1, sampleRate:16000}});
+  } catch(e) {
+    showToast('No se pudo acceder al micrófono', 'err');
+    return;
+  }
+
+  recChunks = [];
+  mediaRecorder = new MediaRecorder(stream, mimeType ? {mimeType: mimeType} : {});
+
+  mediaRecorder.ondataavailable = function(e) {
+    if (e.data && e.data.size > 0) recChunks.push(e.data);
+  };
+
+  mediaRecorder.onstop = function() {
+    stream.getTracks().forEach(function(t) { t.stop(); });
+    isRecordingAudio = false;
+    var btn = document.getElementById('rec-btn');
+    var lbl = document.getElementById('rec-label');
+    var ico = document.getElementById('rec-ico');
+    var st  = document.getElementById('rec-status');
+    if (btn) btn.classList.remove('recording');
+    if (lbl) { lbl.textContent = 'Procesando...'; lbl.classList.remove('rec'); }
+    if (ico) ico.className = 'ti ti-loader-2';
+    if (st)  st.textContent = '';
+
+    var ext = mimeType.includes('mp4') ? 'm4a' : mimeType.includes('ogg') ? 'ogg' : 'webm';
+    var blob = new Blob(recChunks, {type: mediaRecorder.mimeType || 'audio/webm'});
+    sendAudioToServer(blob, 'recording.' + ext).then(function(text) {
+      if (lbl) lbl.textContent = 'Tocá para grabar';
+      if (ico) ico.className = 'ti ti-microphone';
+      if (text) showAudioResult(text);
+      else showToast('No se detectó audio con direcciones', 'err');
+    }).catch(function(err) {
+      if (lbl) lbl.textContent = 'Tocá para grabar';
+      if (ico) ico.className = 'ti ti-microphone';
+      showToast(err.message || 'Error al transcribir', 'err');
+    });
+  };
+
+  mediaRecorder.start();
+  isRecordingAudio = true;
+  var btn = document.getElementById('rec-btn');
+  var lbl = document.getElementById('rec-label');
+  var ico = document.getElementById('rec-ico');
+  if (btn) btn.classList.add('recording');
+  if (lbl) { lbl.textContent = 'Grabando... tocá para detener'; lbl.classList.add('rec'); }
+  if (ico) ico.className = 'ti ti-player-stop';
+}
+
+async function sendAudioToServer(blob, filename) {
+  var fd = new FormData();
+  fd.append('audio', blob, filename);
+  var resp = await fetch('/api/transcribe', {method: 'POST', body: fd});
+  var data = await resp.json();
+  if (!resp.ok) throw new Error(data.error || 'Error del servidor');
+  return data.text || '';
 }
 
 function cleanTranscript(txt) {
@@ -838,7 +954,7 @@ async function runOptimization(txt, demoStops) {
   var isMultiCity = groupKeys.length > 1;
 
   var indices = withCoords.map(function(_, i) { return i + 1; });
-  var seedRoute, optRoute, kmOpt, minOpt, kmSeed, saved;
+  var seedRoute, optRoute, kmOpt, minOpt, kmSeed, saved, routeGroups;
 
   if (isMultiCity) {
     // ── Multi-city path ───────────────────────────────────────────────────────
@@ -860,7 +976,9 @@ async function runOptimization(txt, demoStops) {
 
     step(5, 'r', 'Optimizando cada localidad por separado...');
     await sleep(200);
-    optRoute = optimizeGroups(withCoords, distMatrix);
+    var grpResult = optimizeGroups(withCoords, distMatrix);
+    optRoute     = grpResult.route;
+    routeGroups  = grpResult.groups;
     kmOpt  = routeDistKm(optRoute, distMatrix);
     minOpt = routeDurMin(optRoute, durMatrix);
     saved  = kmSeed - kmOpt;
@@ -923,18 +1041,42 @@ async function runOptimization(txt, demoStops) {
   }];
 
   var cumMin = 0;
-  optRoute.forEach(function(idx, i) {
-    var s = withCoords[idx - 1];
-    var prevIdx = i === 0 ? 0 : optRoute[i - 1];
-    var dM = ((distMatrix[prevIdx] || [])[idx] || 0) / 1000;
-    var durS = (durMatrix[prevIdx] || [])[idx] || 0;
-    var durM = Math.round(durS / 60);
-    cumMin += durM + 2;
-    fullRoute.push(Object.assign({}, s, {
-      isDepot: false, done: false, failed: false, order: i + 1,
-      distKm: dM.toFixed(2), durMin: durM, cumMin: cumMin, eta: fmtMin(cumMin)
-    }));
-  });
+
+  if (isMultiCity && routeGroups) {
+    var flatPos = 0;
+    routeGroups.forEach(function(group, gi) {
+      var color = CITY_COLORS[gi % CITY_COLORS.length];
+      var cityLabel = capitalizeWords(group.name);
+      fullRoute.push({isCityHeader: true, cityName: cityLabel, stopCount: group.indices.length, cityIdx: gi, cityColor: color});
+      group.indices.forEach(function(idx) {
+        var s = withCoords[idx - 1];
+        var prevIdx = flatPos === 0 ? 0 : optRoute[flatPos - 1];
+        var dM = ((distMatrix[prevIdx] || [])[idx] || 0) / 1000;
+        var durS = (durMatrix[prevIdx] || [])[idx] || 0;
+        var durM = Math.round(durS / 60);
+        cumMin += durM + 2;
+        fullRoute.push(Object.assign({}, s, {
+          isDepot: false, done: false, failed: false, order: flatPos + 1,
+          cityName: cityLabel, cityIdx: gi, cityColor: color,
+          distKm: dM.toFixed(2), durMin: durM, cumMin: cumMin, eta: fmtMin(cumMin)
+        }));
+        flatPos++;
+      });
+    });
+  } else {
+    optRoute.forEach(function(idx, i) {
+      var s = withCoords[idx - 1];
+      var prevIdx = i === 0 ? 0 : optRoute[i - 1];
+      var dM = ((distMatrix[prevIdx] || [])[idx] || 0) / 1000;
+      var durS = (durMatrix[prevIdx] || [])[idx] || 0;
+      var durM = Math.round(durS / 60);
+      cumMin += durM + 2;
+      fullRoute.push(Object.assign({}, s, {
+        isDepot: false, done: false, failed: false, order: i + 1,
+        distKm: dM.toFixed(2), durMin: durM, cumMin: cumMin, eta: fmtMin(cumMin)
+      }));
+    });
+  }
 
   noCoords.forEach(function(s, i) {
     fullRoute.push(Object.assign({}, s, {
@@ -1174,6 +1316,12 @@ function fmtMin(m) {
 // MULTI-CITY GROUPING
 // ════════════════════════════════════════
 
+var CITY_COLORS = ['#34d399','#60a5fa','#f59e0b','#f87171','#a78bfa','#38bdf8','#4ade80','#fb923c'];
+
+function capitalizeWords(s) {
+  return (s || '').replace(/\b(\w)/g, function(m) { return m.toUpperCase(); });
+}
+
 // Argentine provinces — used to skip them when extracting locality
 var AR_PROVINCES = /^(buenos aires|santa fe|c[oó]rdoba|mendoza|tucum[aá]n|salta|jujuy|neuqu[eé]n|r[ií]o negro|chubut|santa cruz|tierra del fuego|misiones|corrientes|formosa|chaco|entre r[ií]os|san juan|san luis|la rioja|catamarca|santiago del estero|la pampa|ciudad aut[oó]noma de buenos aires|caba)$/i;
 
@@ -1235,20 +1383,43 @@ function optimizeGroups(withCoords, distMatrix) {
 
   var ordered = orderGroupsByProximity(groupsMap, withCoords);
   var optRoute = [], fromIdx = 0;
+  var routeGroups = [];
 
   ordered.forEach(function(group) {
     var gr = nnFromMatrix(fromIdx, group.indices.slice(), distMatrix);
     gr = twoOptMatrix(gr, distMatrix, fromIdx).route;
+    routeGroups.push({name: group.name, indices: gr});
     optRoute = optRoute.concat(gr);
     fromIdx = gr[gr.length - 1];
   });
 
-  return optRoute;
+  return {route: optRoute, groups: routeGroups};
 }
 
 // ════════════════════════════════════════
 // GEOCODE
 // ════════════════════════════════════════
+
+async function geocacheGet(addr) {
+  try {
+    var r = await fetch('/api/geocode/cache?addr=' + encodeURIComponent(addr));
+    if (!r.ok) return null;
+    var d = await r.json();
+    if (d.found) return d;
+  } catch(e) {}
+  return null;
+}
+
+function geocacheSave(addr, lat, lng, resolvedAddress) {
+  try {
+    fetch('/api/geocode/cache', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({addr: addr, lat: lat, lng: lng, resolvedAddress: resolvedAddress || addr})
+    }).catch(function() {});
+  } catch(e) {}
+}
+
 async function geocodeWithGoogle(addr) {
   if (!CONFIG.googleMapsKey) return null;
   try {
@@ -1289,16 +1460,28 @@ async function nominatimSearch(q) {
 async function geocodeFull(addr) {
   var r1 = resolveAddress(addr);
 
+  // Attempt 0: SQLite geocache local — respuesta instantánea sin red
+  var cached = await geocacheGet(r1);
+  if (cached) {
+    return {lat: cached.lat, lng: cached.lng, resolvedAddress: cached.resolvedAddress, approx: false, fromCache: true};
+  }
+
   // Attempt 1: Google Maps (when key is set) — best for small Argentine cities
   if (CONFIG.googleMapsKey) {
     var g = await geocodeWithGoogle(r1);
-    if (g) return g;
+    if (g) {
+      if (!g.approx) geocacheSave(r1, g.lat, g.lng, g.resolvedAddress || r1);
+      return g;
+    }
     await sleep(100);
   }
 
   // Attempt 2: Nominatim — full resolved address
   var g = await nominatimSearch(r1);
-  if (g) return {lat: g.lat, lng: g.lng, resolvedAddress: r1, approx: false};
+  if (g) {
+    geocacheSave(r1, g.lat, g.lng, r1);
+    return {lat: g.lat, lng: g.lng, resolvedAddress: r1, approx: false};
+  }
   await sleep(250);
 
   var parts = r1.split(',');
@@ -1309,7 +1492,10 @@ async function geocodeFull(addr) {
     var alt2 = street + ', ' + parts[1].trim();
     if (alt2 !== r1) {
       g = await nominatimSearch(alt2);
-      if (g) return {lat: g.lat, lng: g.lng, resolvedAddress: alt2, approx: true};
+      if (g) {
+        geocacheSave(r1, g.lat, g.lng, alt2);
+        return {lat: g.lat, lng: g.lng, resolvedAddress: alt2, approx: true};
+      }
       await sleep(250);
     }
   }
@@ -1320,7 +1506,10 @@ async function geocodeFull(addr) {
     var citySuffix = parts.slice(1).join(',').trim();
     var alt3 = streetNoNum + ', ' + citySuffix;
     g = await nominatimSearch(alt3);
-    if (g) return {lat: g.lat, lng: g.lng, resolvedAddress: alt3, approx: true};
+    if (g) {
+      geocacheSave(r1, g.lat, g.lng, alt3);
+      return {lat: g.lat, lng: g.lng, resolvedAddress: alt3, approx: true};
+    }
   }
 
   // Attempt 5: city center as automatic silent fallback — never block the user
@@ -1683,7 +1872,7 @@ function showResults(stops, km, saved, totalMin) {
   document.getElementById('ws3-t').textContent = '¡Ruta lista!';
   document.getElementById('ws3-s').textContent = 'Distancias calculadas por calles reales';
 
-  var del = stops.filter(function(s) { return !s.isDepot; });
+  var del = stops.filter(function(s) { return !s.isDepot && !s.isCityHeader; });
   document.getElementById('r-sub').textContent =
     del.length + ' paradas · sale desde ' + DEPOT.name;
   document.getElementById('r-stops').textContent = del.length;
@@ -1694,6 +1883,15 @@ function showResults(stops, km, saved, totalMin) {
   var el = document.getElementById('el');
   el.innerHTML = '';
   stops.forEach(function(s, i) {
+    if (s.isCityHeader) {
+      el.innerHTML +=
+        '<div class="city-hdr">' +
+          '<div class="city-hdr-dot" style="background:' + s.cityColor + '"></div>' +
+          '<div class="city-hdr-name">' + s.cityName + '</div>' +
+          '<div class="city-hdr-badge">' + s.stopCount + ' parada' + (s.stopCount !== 1 ? 's' : '') + '</div>' +
+        '</div>';
+      return;
+    }
     var dk = s.distKm && s.distKm !== '0'
       ? '<div class="edist">' + s.distKm + ' km</div>' : '';
     var dt = s.durMin
@@ -1710,8 +1908,9 @@ function showResults(stops, km, saved, totalMin) {
         '</div>';
       return;
     }
+    var dotStyle = s.cityColor ? ' border-left:3px solid ' + s.cityColor + ';padding-left:10px;' : '';
     el.innerHTML +=
-      '<div class="eitem ' + (s.isDepot ? 'is-dep' : '') + '">' +
+      '<div class="eitem ' + (s.isDepot ? 'is-dep' : '') + '" style="' + dotStyle + '">' +
         '<div class="enum ' + (s.isDepot ? 'dep' : '') + '">' + (s.isDepot ? '🏠' : (s.order || i)) + '</div>' +
         '<div class="einf">' +
           '<div class="en">' + s.name + '</div>' +
@@ -1757,22 +1956,47 @@ function drawMap() {
   if (!mainMap) return;
   mapMarkers.forEach(function(m) { mainMap.removeLayer(m); });
   mapMarkers = [];
-  if (routePoly) { mainMap.removeLayer(routePoly); routePoly = null; }
-  var deliveries = R.filter(function(s) { return !s.isDepot; });
+  routePolys.forEach(function(p) { mainMap.removeLayer(p); });
+  routePolys = [];
+
+  var deliveries = R.filter(function(s) { return !s.isDepot && !s.isCityHeader; });
   var ni = deliveries.findIndex(function(s) { return !s.done; });
   var nextStop = ni >= 0 ? deliveries[ni] : null;
+
   R.forEach(function(s) {
-    if (!s.lat || !s.lng) return;
-    if (s.isReturn) return; // depot already shown as first entry; coords close the polyline
+    if (!s.lat || !s.lng || s.isCityHeader) return;
+    if (s.isReturn) return;
     var m = L.marker([s.lat, s.lng], {icon: mkIcon(s.isDepot, s === nextStop, s.done)})
       .bindPopup('<b>' + (s.isDepot ? '🏠 ' : '') + (s.order ? s.order + '. ' : '') + s.name + '</b><br><small>' + s.address + '</small>' +
         (s.distKm && !s.isDepot ? '<br><small>📍 ' + s.distKm + ' km · ⏱ ' + (s.durMin||0) + ' min</small>' : ''))
       .addTo(mainMap);
     mapMarkers.push(m);
   });
-  // Polyline includes isReturn entry so the route closes visually back to depot
-  var pts = R.filter(function(s) { return s.lat && s.lng; }).map(function(s) { return [s.lat, s.lng]; });
-  if (pts.length > 1) routePoly = L.polyline(pts, {color:'#34d399', weight:3, dashArray:'8,5', opacity:.85}).addTo(mainMap);
+
+  var hasMultiCity = R.some(function(s) { return s.cityIdx !== undefined && !s.isDepot; });
+  if (hasMultiCity) {
+    // Draw one colored polyline segment per city (entry point from previous stop included)
+    var orderedPts = R.filter(function(s) { return s.lat && s.lng && !s.isCityHeader; });
+    var curCityIdx = null, curColor = null, curPts = [], prevPt = null;
+    orderedPts.forEach(function(s) {
+      if (s.isDepot && !s.isReturn) { prevPt = [s.lat, s.lng]; return; }
+      var ci = s.isReturn ? '__return__' : String(s.cityIdx !== undefined ? s.cityIdx : '_');
+      var color = s.isReturn ? '#3a3a3a' : (s.cityColor || '#34d399');
+      if (ci !== curCityIdx) {
+        if (curPts.length > 1) routePolys.push(L.polyline(curPts, {color: curColor, weight:3, dashArray:'8,5', opacity:.9}).addTo(mainMap));
+        curCityIdx = ci;
+        curColor = color;
+        curPts = prevPt ? [prevPt] : [];
+      }
+      curPts.push([s.lat, s.lng]);
+      prevPt = [s.lat, s.lng];
+    });
+    if (curPts.length > 1) routePolys.push(L.polyline(curPts, {color: curColor, weight:3, dashArray:'8,5', opacity:.9}).addTo(mainMap));
+  } else {
+    var pts = R.filter(function(s) { return s.lat && s.lng; }).map(function(s) { return [s.lat, s.lng]; });
+    if (pts.length > 1) routePolys.push(L.polyline(pts, {color:'#34d399', weight:3, dashArray:'8,5', opacity:.85}).addTo(mainMap));
+  }
+
   updateMapCard();
   if (mapMarkers.length > 0) {
     mainMap.fitBounds(L.featureGroup(mapMarkers).getBounds(), {padding: [50, 50]});
@@ -1786,7 +2010,7 @@ function fitRoute() {
 }
 
 function updateMapCard() {
-  var nxt = R.filter(function(s) { return !s.isDepot; }).find(function(s) { return !s.done; });
+  var nxt = R.filter(function(s) { return !s.isDepot && !s.isCityHeader; }).find(function(s) { return !s.done; });
   document.getElementById('mn-name').textContent = nxt ? nxt.name : 'Ruta completada 🎉';
   document.getElementById('mn-addr').textContent = nxt
     ? (nxt.address || '').split(',').slice(0,2).join(',') : 'Todas las entregas realizadas';
@@ -1801,11 +2025,11 @@ function updateMapCard() {
 }
 
 function navNext() {
-  var n = R.filter(function(s) { return !s.isDepot; }).find(function(s) { return !s.done; });
+  var n = R.filter(function(s) { return !s.isDepot && !s.isCityHeader; }).find(function(s) { return !s.done; });
   if (n) navTo(n);
 }
 function doneNext() {
-  var n = R.filter(function(s) { return !s.isDepot; }).find(function(s) { return !s.done; });
+  var n = R.filter(function(s) { return !s.isDepot && !s.isCityHeader; }).find(function(s) { return !s.done; });
   if (!n) return;
   n.done = true; drawMap(); renderHome(); saveRouteToStorage();
   showToast(n.name + ' — entregado', 'ok');
@@ -1823,7 +2047,7 @@ function initMini(lat, lng) {
 // HOME / LIST / DETAIL
 // ════════════════════════════════════════
 function renderHome() {
-  var del = R.filter(function(s) { return !s.isDepot; });
+  var del = R.filter(function(s) { return !s.isDepot && !s.isCityHeader; });
   var done = del.filter(function(s) { return s.done; }).length;
   var tot = del.length;
   var pct = tot ? Math.round(done / tot * 100) : 0;
@@ -1855,6 +2079,13 @@ function renderHome() {
 
 function scHTML(i, nxt) {
   var s = R[i];
+  if (s.isCityHeader) {
+    return '<div class="city-hdr">' +
+      '<div class="city-hdr-dot" style="background:' + s.cityColor + '"></div>' +
+      '<div class="city-hdr-name">' + s.cityName + '</div>' +
+      '<div class="city-hdr-badge">' + s.stopCount + ' parada' + (s.stopCount !== 1 ? 's' : '') + '</div>' +
+    '</div>';
+  }
   if (s.isReturn) {
     var dk = s.distKm && s.distKm !== '0' ? '<span class="tag tgr">' + s.distKm + ' km</span>' : '';
     var dt = s.durMin ? '<span class="tag tblu">' + s.durMin + 'm</span>' : '';
@@ -1877,7 +2108,8 @@ function scHTML(i, nxt) {
     : s.done ? '<span class="tag tgr">✓ Entregado</span>'
     : '<span class="tag tgray">Pendiente</span>';
   var addr = (s.address || '').split(',').slice(0,2).join(',');
-  return '<div class="sc ' + cc + '" onclick="openStop(' + i + ')">' +
+  var cityBorder = s.cityColor && !dep ? ' border-left:3px solid ' + s.cityColor + ';' : '';
+  return '<div class="sc ' + cc + '" style="' + cityBorder + '" onclick="openStop(' + i + ')">' +
     '<div class="bnum ' + nc + '">' + ni + '</div>' +
     '<div class="sinfo">' +
       '<div class="sinfo-n">' + s.name + '</div>' +
@@ -1889,7 +2121,7 @@ function scHTML(i, nxt) {
 }
 
 function renderList() {
-  var del = R.filter(function(s) { return !s.isDepot; });
+  var del = R.filter(function(s) { return !s.isDepot && !s.isCityHeader; });
   var done = del.filter(function(s) { return s.done; }).length;
   document.getElementById('st-title').textContent = 'Recorrido completo';
   document.getElementById('st-sub').textContent = R.length
@@ -1900,19 +2132,22 @@ function renderList() {
     el.innerHTML = '<div style="color:#333;font-size:13px;padding:24px;text-align:center">Creá una ruta para ver las paradas</div>';
     return;
   }
-  var ni = R.findIndex(function(s) { return !s.isDepot && !s.done; });
+  var ni = R.findIndex(function(s) { return !s.isDepot && !s.isCityHeader && !s.done; });
+  var prevWasHeader = false;
   R.forEach(function(s, i) {
-    el.innerHTML += (i ? '<div class="cxn"></div>' : '') + scHTML(i, i === ni);
+    var showCxn = i > 0 && !s.isCityHeader && !prevWasHeader;
+    el.innerHTML += (showCxn ? '<div class="cxn"></div>' : '') + scHTML(i, i === ni);
+    prevWasHeader = !!s.isCityHeader;
   });
 }
 
 function openStop(i) {
   var s = R[i];
-  if (s.isReturn) return;
+  if (s.isReturn || s.isCityHeader) return;
   detIdx = i;
   document.getElementById('d-name').textContent = s.name;
   document.getElementById('d-num').textContent = s.isDepot
-    ? 'Punto de salida' : 'Parada ' + s.order + ' de ' + R.filter(function(x) { return !x.isDepot; }).length;
+    ? 'Punto de salida' : 'Parada ' + s.order + ' de ' + R.filter(function(x) { return !x.isDepot && !x.isCityHeader; }).length;
   document.getElementById('d-addr').textContent = s.address || '—';
   document.getElementById('d-coords').textContent = s.lat
     ? s.lat.toFixed(5) + ', ' + s.lng.toFixed(5) : 'Sin GPS';

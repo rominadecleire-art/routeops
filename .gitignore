@@ -1,3 +1,6 @@
+# Base de datos local de geocache
+geocache.db
+
 # Python
 __pycache__/
 *.pyc

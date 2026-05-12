@@ -288,18 +288,37 @@
 
       <!-- PANEL AUDIO -->
       <div id="mpanel-audio" style="display:none">
-        <div class="audio-card">
-          <div class="audio-hint">
-            Hablá despacio y mencioná una dirección por vez.<br>
-            Ej: <em>"Rivadavia 567 Venado Tuerto, Belgrano 900..."</em>
+        <!-- Web Speech (Chrome / Android) -->
+        <div id="ws-audio">
+          <div class="audio-card">
+            <div class="audio-hint">
+              Hablá despacio y mencioná una dirección por vez.<br>
+              Ej: <em>"Rivadavia 567 Venado Tuerto, Belgrano 900..."</em>
+            </div>
+            <button class="mic-btn" id="mic-btn" onclick="toggleMic()">
+              <div class="mic-pulse" id="mic-pulse"></div>
+              <i class="ti ti-microphone" id="mic-ico"></i>
+            </button>
+            <div class="mic-label" id="mic-label">Tocá para hablar</div>
+            <div class="mic-interim" id="mic-interim"></div>
           </div>
-          <button class="mic-btn" id="mic-btn" onclick="toggleMic()">
-            <div class="mic-pulse" id="mic-pulse"></div>
-            <i class="ti ti-microphone" id="mic-ico"></i>
-          </button>
-          <div class="mic-label" id="mic-label">Tocá para hablar</div>
-          <div class="mic-interim" id="mic-interim"></div>
         </div>
+        <!-- MediaRecorder fallback (iOS Safari / Firefox) -->
+        <div id="ios-recorder" style="display:none">
+          <div class="audio-card">
+            <div class="audio-hint">
+              Grabá el audio con las direcciones.<br>
+              La IA lo transcribe automáticamente.
+            </div>
+            <button class="mic-btn" id="rec-btn" onclick="toggleRecorder()">
+              <div class="mic-pulse" id="rec-pulse"></div>
+              <i class="ti ti-microphone" id="rec-ico"></i>
+            </button>
+            <div class="mic-label" id="rec-label">Tocá para grabar</div>
+            <div class="mic-interim" id="rec-status"></div>
+          </div>
+        </div>
+        <!-- Resultado compartido -->
         <div class="audio-result" id="audio-result" style="display:none">
           <div class="audio-result-lbl">Texto transcripto</div>
           <div class="audio-result-txt" id="audio-txt"></div>
@@ -312,11 +331,12 @@
             </button>
           </div>
         </div>
+        <!-- Sin soporte -->
         <div class="audio-no-support" id="audio-no-support" style="display:none">
           <i class="ti ti-alert-triangle" style="font-size:20px;color:#f59e0b"></i>
           <div style="font-size:12px;color:#9ca3af">
-            Tu navegador no soporta reconocimiento de voz.<br>
-            Usá Chrome en Android o iOS para esta función.
+            Tu navegador no soporta reconocimiento de voz ni grabación de audio.<br>
+            Usá Chrome en Android o Safari en iOS 14.3+.
           </div>
         </div>
       </div>

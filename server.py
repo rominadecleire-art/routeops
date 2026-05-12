@@ -3,6 +3,8 @@ import io
 import json
 import base64
 import logging
+import sqlite3
+import threading
 import traceback
 
 from flask import Flask, request, jsonify, send_from_directory
@@ -22,6 +24,51 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__)
 CORS(app)
 
+# ── SQLite geocoding cache ──────────────────────────────────────────────────────
+
+DB_PATH = os.path.join(BASE_DIR, 'geocache.db')
+_db_lock = threading.Lock()
+
+
+def _db_conn():
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def _init_db():
+    with _db_lock:
+        conn = _db_conn()
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS geocache (
+                addr_key     TEXT PRIMARY KEY,
+                original_addr TEXT NOT NULL,
+                lat          REAL NOT NULL,
+                lng          REAL NOT NULL,
+                resolved_addr TEXT,
+                hit_count    INTEGER DEFAULT 1,
+                created_at   TEXT DEFAULT (datetime("now")),
+                last_hit     TEXT DEFAULT (datetime("now"))
+            )
+        ''')
+        conn.commit()
+        conn.close()
+    count = _db_count()
+    log.info('GeocCache SQLite: %s (%d entradas)', DB_PATH, count)
+
+
+def _db_count():
+    try:
+        conn = _db_conn()
+        n = conn.execute('SELECT COUNT(*) FROM geocache').fetchone()[0]
+        conn.close()
+        return n
+    except Exception:
+        return 0
+
+
+_init_db()
+
 CLAUDE_MODEL = 'claude-sonnet-4-6'
 
 ADDRESS_PROMPT = (
@@ -34,25 +81,30 @@ ADDRESS_PROMPT = (
 # Prompt especializado para hojas de ruta escaneadas con columnas Destinatario/Domicilio
 SCANNED_PDF_PROMPT = (
     'Esta imagen es una página de una hoja de ruta de reparto.\n'
-    'Analizá la tabla y extraé cada fila con datos de entrega.\n'
+    'Tu tarea: extraer TODAS Y CADA UNA de las filas con datos de entrega, SIN EXCEPCIÓN.\n'
+    '\n'
+    'PASO 1 — Contá mentalmente cuántas filas de datos (no encabezados) hay en la tabla.\n'
+    'PASO 2 — Extraé exactamente ese número de entradas. No omitás ninguna.\n'
     '\n'
     'Las columnas pueden llamarse:\n'
     '  • Destinatario / Cliente / Nombre / Receptor\n'
     '  • Domicilio / Dirección / Calle / Entrega\n'
-    '  • Localidad / Ciudad / Partido / Zona\n'
+    '  • Localidad / Ciudad / Partido / Zona / Barrio\n'
     '\n'
-    'Por cada fila con datos, generá una entrada con:\n'
-    '  - name: el contenido de la columna Destinatario/Cliente/Nombre\n'
+    'Por cada fila con datos (aunque esté incompleta), generá una entrada:\n'
+    '  - name: contenido de la columna Destinatario/Cliente/Nombre\n'
     '  - address: Calle Número, Localidad, Provincia, Argentina\n'
     '\n'
-    'Devolvé SOLO este JSON, sin texto extra, sin markdown:\n'
-    '{"stops":[{"name":"Nombre destinatario","address":"Calle Número, Localidad, Provincia, Argentina"}]}\n'
-    '\n'
-    'Reglas:\n'
+    'Reglas ESTRICTAS:\n'
+    '- NUNCA omitás una fila que tenga al menos calle o destinatario.\n'
     '- Si una fila no tiene localidad, usá la localidad más repetida en la página.\n'
-    '- Si hay Piso/Depto, incluilo en la dirección.\n'
-    '- Omití filas vacías y encabezados de columna.\n'
-    '- Si la página no tiene datos de entrega, devolvé: {"stops":[]}'
+    '- Si hay Piso/Depto/Unidad, incluilo en la dirección.\n'
+    '- Si el número de calle no está claro, escribilo como aparece (aunque sea ilegible).\n'
+    '- Omití SOLO filas completamente vacías y encabezados de columna.\n'
+    '- Si la página no tiene datos de entrega: {"stops":[]}\n'
+    '\n'
+    'Devolvé SOLO este JSON, sin texto extra, sin markdown, sin explicaciones:\n'
+    '{"stops":[{"name":"Nombre destinatario","address":"Calle Número, Localidad, Provincia, Argentina"}]}'
 )
 
 
@@ -111,7 +163,7 @@ def _parse_scanned_pdf_page_by_page(client, page_images):
         try:
             response = client.messages.create(
                 model=CLAUDE_MODEL,
-                max_tokens=2000,
+                max_tokens=4096,
                 messages=[{
                     'role': 'user',
                     'content': [
@@ -417,6 +469,110 @@ def test_pdf():
     return jsonify({'results': results, 'overall': 'ok'})
 
 
+# ── Audio transcription (Whisper via OpenAI) ──────────────────────────────────
+
+@app.route('/api/transcribe', methods=['POST'])
+def transcribe_audio():
+    if 'audio' not in request.files:
+        return jsonify({'error': 'Falta el archivo de audio (campo "audio")'}), 400
+
+    openai_key = os.environ.get('OPENAI_API_KEY')
+    if not openai_key:
+        return jsonify({'error': 'Transcripción no disponible. Configurá OPENAI_API_KEY en el servidor.'}), 503
+
+    file = request.files['audio']
+    audio_bytes = file.read()
+    filename = file.filename or 'recording.webm'
+    log.info('transcribe: name=%r size=%d bytes', filename, len(audio_bytes))
+
+    if len(audio_bytes) < 1000:
+        return jsonify({'error': 'El audio es demasiado corto o está vacío'}), 400
+
+    try:
+        from openai import OpenAI
+        oa = OpenAI(api_key=openai_key)
+        audio_io = io.BytesIO(audio_bytes)
+        audio_io.name = filename
+        result = oa.audio.transcriptions.create(
+            model='whisper-1',
+            file=audio_io,
+            language='es',
+            prompt='Hoja de ruta de reparto con direcciones en Argentina. Localidades como Venado Tuerto, Rosario, Santa Fe.',
+        )
+        text = (result.text or '').strip()
+        log.info('transcribe OK: %d chars — %s', len(text), text[:120])
+        return jsonify({'text': text})
+    except Exception as e:
+        log.error('transcribe falló: %s\n%s', e, traceback.format_exc())
+        return jsonify({'error': str(e)}), 500
+
+
+# ── Geocoding cache (SQLite) ───────────────────────────────────────────────────
+
+@app.route('/api/geocode/cache', methods=['GET'])
+def geocache_lookup():
+    addr = request.args.get('addr', '').strip()
+    if not addr:
+        return jsonify({'found': False}), 400
+    key = addr.lower().strip()
+    with _db_lock:
+        conn = _db_conn()
+        row = conn.execute(
+            'SELECT lat, lng, resolved_addr FROM geocache WHERE addr_key = ?', (key,)
+        ).fetchone()
+        if row:
+            conn.execute(
+                'UPDATE geocache SET hit_count = hit_count + 1, last_hit = datetime("now") WHERE addr_key = ?',
+                (key,)
+            )
+            conn.commit()
+        conn.close()
+    if row:
+        log.info('GeocCache HIT: %s → %.6f,%.6f', addr[:60], row['lat'], row['lng'])
+        return jsonify({'found': True, 'lat': row['lat'], 'lng': row['lng'],
+                        'resolvedAddress': row['resolved_addr']})
+    return jsonify({'found': False})
+
+
+@app.route('/api/geocode/cache', methods=['POST'])
+def geocache_save():
+    data = request.get_json(silent=True) or {}
+    addr = (data.get('addr') or '').strip()
+    lat = data.get('lat')
+    lng = data.get('lng')
+    resolved = (data.get('resolvedAddress') or addr).strip()
+    if not addr or lat is None or lng is None:
+        return jsonify({'saved': False, 'error': 'Faltan campos addr/lat/lng'}), 400
+    key = addr.lower().strip()
+    with _db_lock:
+        conn = _db_conn()
+        conn.execute('''
+            INSERT INTO geocache (addr_key, original_addr, lat, lng, resolved_addr)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(addr_key) DO UPDATE SET
+                lat = excluded.lat, lng = excluded.lng,
+                resolved_addr = excluded.resolved_addr,
+                hit_count = hit_count + 1,
+                last_hit = datetime("now")
+        ''', (key, addr, float(lat), float(lng), resolved))
+        conn.commit()
+        conn.close()
+    log.info('GeocCache SAVE: %s → %.6f,%.6f', addr[:60], float(lat), float(lng))
+    return jsonify({'saved': True})
+
+
+@app.route('/api/geocode/cache/stats', methods=['GET'])
+def geocache_stats():
+    with _db_lock:
+        conn = _db_conn()
+        total = conn.execute('SELECT COUNT(*) FROM geocache').fetchone()[0]
+        top = conn.execute(
+            'SELECT original_addr, hit_count FROM geocache ORDER BY hit_count DESC LIMIT 10'
+        ).fetchall()
+        conn.close()
+    return jsonify({'total': total, 'top': [{'addr': r[0], 'hits': r[1]} for r in top]})
+
+
 # ── Health check ───────────────────────────────────────────────────────────────
 
 @app.route('/api/health')
@@ -448,6 +604,7 @@ def serve_static(filename):
 
 
 if __name__ == '__main__':
+    _init_db()
     port = int(os.environ.get('PORT', 5000))
     log.info('RouteOps arrancando en http://0.0.0.0:%d', port)
     log.info('Claude IA: %s', 'activo' if os.environ.get('ANTHROPIC_API_KEY') else 'NO configurado')
