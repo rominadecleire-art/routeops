@@ -233,11 +233,14 @@
         <div class="wdot"></div>
       </div>
       <div class="wiz-t">Cargá las paradas</div>
-      <div class="wiz-s">Elegí cómo querés ingresar las direcciones. Podés combinar los tres métodos.</div>
+      <div class="wiz-s">Elegí cómo querés ingresar las direcciones. Podés combinar los métodos.</div>
 
       <div class="method-tabs">
         <button class="mtab act" id="tab-pdf" onclick="switchMethod('pdf')">
           <i class="ti ti-file-type-pdf"></i><span>PDF</span>
+        </button>
+        <button class="mtab" id="tab-image" onclick="switchMethod('image')">
+          <i class="ti ti-camera"></i><span>Foto</span>
         </button>
         <button class="mtab" id="tab-audio" onclick="switchMethod('audio')">
           <i class="ti ti-microphone"></i><span>Audio</span>
@@ -261,6 +264,26 @@
           <span id="pdf-name">PDF listo</span>
           <button onclick="clearPDF()" style="margin-left:auto;background:none;border:none;color:#60a5fa;cursor:pointer;font-size:12px">✕ Quitar</button>
         </div>
+      </div>
+
+      <!-- PANEL IMAGEN -->
+      <div id="mpanel-image" style="display:none">
+        <input type="file" id="fi-cam" accept="image/*" capture="environment" style="display:none" onchange="addImages(this.files)">
+        <input type="file" id="fi-gal" accept="image/*" multiple style="display:none" onchange="addImages(this.files)">
+        <div style="display:flex;gap:10px;margin-bottom:10px">
+          <div class="dz" style="flex:1;padding:16px 8px;cursor:pointer;text-align:center" onclick="document.getElementById('fi-cam').click()">
+            <div class="dz-ico"><i class="ti ti-camera" style="color:#34d399"></i></div>
+            <div class="dz-t" style="font-size:13px">Cámara</div>
+            <div class="dz-s">Sacar foto</div>
+          </div>
+          <div class="dz" style="flex:1;padding:16px 8px;cursor:pointer;text-align:center" onclick="document.getElementById('fi-gal').click()">
+            <div class="dz-ico"><i class="ti ti-photo" style="color:#60a5fa"></i></div>
+            <div class="dz-t" style="font-size:13px">Galería</div>
+            <div class="dz-s">Una o varias fotos</div>
+          </div>
+        </div>
+        <div id="img-list"></div>
+        <div class="dz-pill" style="margin-top:6px"><i class="ti ti-eye" style="font-size:11px"></i> Claude Vision · requiere ANTHROPIC_API_KEY</div>
       </div>
 
       <!-- PANEL AUDIO -->

@@ -95,6 +95,7 @@ var pendingPDF = null;
 var detIdx = -1;
 var mainMap = null, miniMap = null, routePoly = null, mapMarkers = [];
 var distMatrix = [], durMatrix = [];
+var pendingImages = [];
 
 var SAVED = [
   {name:'Depósito Pardal',  address:'Pardal 267, Venado Tuerto, Santa Fe, Argentina',    lat:-33.7540455, lng:-61.9449982},
@@ -130,9 +131,11 @@ document.getElementById('hdt').textContent =
 // ════════════════════════════════════════
 // SCREEN NAVIGATION
 // ════════════════════════════════════════
-function go(id) {
+// Internal: switch active screen without touching history
+function showScreen(id) {
   document.querySelectorAll('.screen').forEach(function(s) { s.classList.remove('active'); });
-  document.getElementById(id).classList.add('active');
+  var el = document.getElementById(id);
+  if (el) el.classList.add('active');
   if (id === 'scr-home') renderHome();
   if (id === 'scr-stops') renderList();
   if (id === 'scr-map') {
@@ -150,6 +153,18 @@ function go(id) {
     updateGmapsKeyHint();
   }
 }
+
+// Public: navigate and record in browser history so the device back button works
+function go(id) {
+  history.pushState({screen: id}, '', '');
+  showScreen(id);
+}
+
+// Device / browser back button — navigate within the app, not to a previous URL
+window.addEventListener('popstate', function(e) {
+  var id = (e.state && e.state.screen) || 'scr-home';
+  showScreen(id);
+});
 
 // ════════════════════════════════════════
 // WIZARD
@@ -180,6 +195,9 @@ function startWizard() {
   if (fi) fi.value = '';
   var pdfReady = document.getElementById('pdf-ready');
   if (pdfReady) pdfReady.classList.remove('on');
+  pendingImages = [];
+  ['fi-cam','fi-gal'].forEach(function(id) { var el=document.getElementById(id); if(el) el.value=''; });
+  renderImageList();
   var depOk = document.getElementById('dep-ok');
   if (depOk) depOk.classList.remove('on');
   var audioRes = document.getElementById('audio-result');
@@ -451,13 +469,73 @@ function clearPDF() {
   if (fi) fi.value = '';
 }
 
+function addImages(fileList) {
+  if (!fileList || !fileList.length) return;
+  for (var i = 0; i < fileList.length; i++) pendingImages.push(fileList[i]);
+  renderImageList();
+  showToast(fileList.length === 1
+    ? 'Imagen agregada: ' + fileList[0].name
+    : fileList.length + ' imágenes agregadas', 'ok');
+}
+function removeImage(i) {
+  pendingImages.splice(i, 1);
+  // Reset inputs so the same file can be re-added if needed
+  ['fi-cam','fi-gal'].forEach(function(id) { var el=document.getElementById(id); if(el) el.value=''; });
+  renderImageList();
+}
+function renderImageList() {
+  var el = document.getElementById('img-list');
+  if (!el) return;
+  if (!pendingImages.length) { el.innerHTML = ''; return; }
+  el.innerHTML = pendingImages.map(function(f, i) {
+    return '<div class="pdf-ready on" style="margin-bottom:4px">' +
+      '<i class="ti ti-photo-check" style="font-size:16px;flex-shrink:0"></i>' +
+      '<span style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0">' + f.name + '</span>' +
+      '<button onclick="removeImage(' + i + ')" style="background:none;border:none;color:#60a5fa;cursor:pointer;font-size:12px;padding:0 4px;flex-shrink:0">✕</button>' +
+      '</div>';
+  }).join('');
+}
+async function callClaudeImage(file) {
+  var formData = new FormData();
+  formData.append('image', file);
+  var resp = await fetch(CONFIG.apiBase + '/api/extract-image', {method: 'POST', body: formData});
+  if (!resp.ok) {
+    var err = await resp.json().catch(function() { return {}; });
+    throw new Error(err.error || 'Error del servidor (' + resp.status + ')');
+  }
+  var data = await resp.json();
+  if (data.stops && data.stops.length > 0) return data.stops;
+  throw new Error('Sin direcciones en ' + file.name);
+}
+async function callClaudeImages(files) {
+  var allStops = [], errors = [];
+  for (var i = 0; i < files.length; i++) {
+    step(1, 'r', 'Procesando imagen ' + (i + 1) + ' de ' + files.length + '...');
+    try {
+      var s = await callClaudeImage(files[i]);
+      allStops = allStops.concat(s);
+    } catch(e) { errors.push(files[i].name); }
+  }
+  if (!allStops.length) throw new Error(
+    errors.length ? 'Sin direcciones en: ' + errors.join(', ') : 'No se encontraron direcciones'
+  );
+  // Deduplicate by normalized address across all images
+  var seen = {};
+  return allStops.filter(function(s) {
+    var key = (s.address || '').toLowerCase().replace(/\s+/g, ' ').trim();
+    if (!key || seen[key]) return false;
+    seen[key] = true;
+    return true;
+  });
+}
+
 function goStep3() {
   var txt = '';
   if (currentMethod === 'text') {
     txt = document.getElementById('mtxt').value.trim();
   }
-  if (!txt && !manualQueue.length && !pendingPDF) {
-    showToast('Agregá al menos una parada o subí un PDF', 'info');
+  if (!txt && !manualQueue.length && !pendingPDF && !pendingImages.length) {
+    showToast('Agregá al menos una parada, subí un PDF o una foto', 'info');
     return;
   }
   showWS(3);
@@ -475,7 +553,7 @@ function runDemo() {
 // ════════════════════════════════════════
 function switchMethod(m) {
   currentMethod = m;
-  ['pdf','audio','text'].forEach(function(x) {
+  ['pdf','image','audio','text'].forEach(function(x) {
     var tab = document.getElementById('tab-' + x);
     var panel = document.getElementById('mpanel-' + x);
     if (tab) tab.classList.toggle('act', x === m);
@@ -490,6 +568,7 @@ function switchMethod(m) {
 var recognition = null;
 var isRecording = false;
 var audioTranscript = '';
+var processedResultsCount = 0;
 
 function initAudio() {
   var noSupport = document.getElementById('audio-no-support');
@@ -542,16 +621,17 @@ function initAudio() {
 
   recognition.onresult = function(event) {
     var interim = '';
-    var finalText = '';
-    for (var i = event.resultIndex; i < event.results.length; i++) {
-      var t = event.results[i][0].transcript;
+    // Use processedResultsCount instead of event.resultIndex to prevent re-processing
+    // when continuous mode restarts and sends resultIndex=0 again
+    for (var i = processedResultsCount; i < event.results.length; i++) {
+      var t = event.results[i][0].transcript.trim();
       if (event.results[i].isFinal) {
-        finalText += t + ' ';
+        if (t) audioTranscript += (audioTranscript ? '\n' : '') + t;
+        processedResultsCount++;
       } else {
         interim += t;
       }
     }
-    if (finalText) audioTranscript += finalText;
     var interimEl = document.getElementById('mic-interim');
     if (interimEl) interimEl.textContent = interim || audioTranscript;
   };
@@ -566,6 +646,7 @@ function toggleMic() {
     recognition.stop();
   } else {
     audioTranscript = '';
+    processedResultsCount = 0;
     document.getElementById('mic-interim').textContent = '';
     var res = document.getElementById('audio-result');
     if (res) res.style.display = 'none';
@@ -578,11 +659,32 @@ function toggleMic() {
   }
 }
 
+function cleanTranscript(txt) {
+  if (!txt) return '';
+  var lines = txt.split('\n')
+    .map(function(l) { return l.trim(); })
+    .filter(function(l) { return l.length > 4; });
+
+  var seen = [];
+  var result = [];
+  lines.forEach(function(line) {
+    var norm = line.toLowerCase().replace(/\s+/g, ' ');
+    // Skip if already seen, or if this line is a prefix of a longer one already kept (partial recognition)
+    var isDup = seen.some(function(s) {
+      return s === norm || s.startsWith(norm + ' ') || norm.startsWith(s + ' ');
+    });
+    if (!isDup) { seen.push(norm); result.push(line); }
+  });
+  return result.join('\n');
+}
+
 function showAudioResult(txt) {
+  var cleaned = cleanTranscript(txt);
   var res = document.getElementById('audio-result');
   var txtEl = document.getElementById('audio-txt');
+  if (!cleaned) { if (res) res.style.display = 'none'; return; }
   if (res) res.style.display = 'block';
-  if (txtEl) txtEl.textContent = txt;
+  if (txtEl) txtEl.textContent = cleaned;
 }
 
 function useAudioText() {
@@ -642,6 +744,15 @@ async function runOptimization(txt, demoStops) {
     } catch(e) {
       step(1, 'er', 'Error procesando el PDF');
       showToast('Error al procesar el PDF: ' + e.message, 'err');
+      return;
+    }
+  } else if (pendingImages.length) {
+    try {
+      stops = await callClaudeImages(pendingImages);
+      step(1, 'ok', stops.length + ' paradas en ' + pendingImages.length + ' imagen' + (pendingImages.length > 1 ? 'es' : '') + ' (Claude Vision)');
+    } catch(e) {
+      step(1, 'er', 'Error procesando imágenes');
+      showToast(e.message, 'err');
       return;
     }
   } else if (txt) {
@@ -721,33 +832,69 @@ async function runOptimization(txt, demoStops) {
     });
   }
 
-  step(4, 'r', 'Nearest neighbor desde punto de salida...');
-  await sleep(200);
+  // ── Detect multi-city ────────────────────────────────────────────────────────
+  var groupsMap = groupByLocality(withCoords);
+  var groupKeys = Object.keys(groupsMap);
+  var isMultiCity = groupKeys.length > 1;
+
   var indices = withCoords.map(function(_, i) { return i + 1; });
-  var seedRoute = nnFromMatrix(0, indices, distMatrix);
-  var kmSeed = routeDistKm(seedRoute, distMatrix);
-  step(4, 'ok', 'Ruta inicial: ' + kmSeed.toFixed(1) + ' km');
+  var seedRoute, optRoute, kmOpt, minOpt, kmSeed, saved;
 
-  // ── DEBUG: NN seed route ──────────────────────────────────────────────────
-  console.group('RouteOps DEBUG — NN seed route');
-  console.log('0:' + DEPOT.name + ' (depot)');
-  seedRoute.forEach(function(idx, pos) {
-    var s = withCoords[idx - 1];
-    var d = ((distMatrix[pos === 0 ? 0 : seedRoute[pos - 1]] || [])[idx] || 0);
-    console.log((pos + 1) + '. [mat:' + idx + '] ' + s.name + ' — ' + Math.round(d) + 'm from prev');
-  });
-  console.log('Total NN: ' + kmSeed.toFixed(3) + ' km (round-trip)');
-  console.groupEnd();
+  if (isMultiCity) {
+    // ── Multi-city path ───────────────────────────────────────────────────────
+    step(4, 'r', 'Agrupando ' + groupKeys.length + ' localidades...');
+    await sleep(200);
 
-  step(5, 'r', 'Aplicando 2-opt + or-opt...');
-  await sleep(200);
-  var twoOptResult = twoOptMatrix(seedRoute, distMatrix);
-  var orOptResult  = orOpt1(twoOptResult.route, distMatrix);
-  var optRoute = orOptResult.route;
-  var kmOpt = routeDistKm(optRoute, distMatrix);
-  var minOpt = routeDurMin(optRoute, durMatrix);
-  var saved  = kmSeed - kmOpt;
-  step(5, 'ok', '2-opt+or-opt: ' + kmOpt.toFixed(1) + ' km · −' + saved.toFixed(1) + ' km');
+    console.group('RouteOps DEBUG — multi-city groups');
+    groupKeys.forEach(function(k) {
+      var g = groupsMap[k];
+      console.log(k + ' (' + g.indices.length + ' paradas): indices [' + g.indices.join(', ') + ']');
+    });
+    console.groupEnd();
+
+    seedRoute = nnFromMatrix(0, indices, distMatrix);
+    kmSeed = routeDistKm(seedRoute, distMatrix);
+    step(4, 'ok', groupKeys.length + ' localidades: ' + groupKeys.map(function(k) {
+      return k + ' (' + groupsMap[k].indices.length + ')';
+    }).join(' · '));
+
+    step(5, 'r', 'Optimizando cada localidad por separado...');
+    await sleep(200);
+    optRoute = optimizeGroups(withCoords, distMatrix);
+    kmOpt  = routeDistKm(optRoute, distMatrix);
+    minOpt = routeDurMin(optRoute, durMatrix);
+    saved  = kmSeed - kmOpt;
+    step(5, 'ok', 'Multi-ciudad NN+2-opt: ' + kmOpt.toFixed(1) + ' km · −' + saved.toFixed(1) + ' km');
+
+  } else {
+    // ── Single-city path (original) ───────────────────────────────────────────
+    step(4, 'r', 'Nearest neighbor desde punto de salida...');
+    await sleep(200);
+    seedRoute = nnFromMatrix(0, indices, distMatrix);
+    kmSeed = routeDistKm(seedRoute, distMatrix);
+    step(4, 'ok', 'Ruta inicial: ' + kmSeed.toFixed(1) + ' km');
+
+    // ── DEBUG: NN seed route ────────────────────────────────────────────────
+    console.group('RouteOps DEBUG — NN seed route');
+    console.log('0:' + DEPOT.name + ' (depot)');
+    seedRoute.forEach(function(idx, pos) {
+      var s = withCoords[idx - 1];
+      var d = ((distMatrix[pos === 0 ? 0 : seedRoute[pos - 1]] || [])[idx] || 0);
+      console.log((pos + 1) + '. [mat:' + idx + '] ' + s.name + ' — ' + Math.round(d) + 'm from prev');
+    });
+    console.log('Total NN: ' + kmSeed.toFixed(3) + ' km (round-trip)');
+    console.groupEnd();
+
+    step(5, 'r', 'Aplicando 2-opt + or-opt...');
+    await sleep(200);
+    var twoOptResult = twoOptMatrix(seedRoute, distMatrix);
+    var orOptResult  = orOpt1(twoOptResult.route, distMatrix);
+    optRoute = orOptResult.route;
+    kmOpt  = routeDistKm(optRoute, distMatrix);
+    minOpt = routeDurMin(optRoute, durMatrix);
+    saved  = kmSeed - kmOpt;
+    step(5, 'ok', '2-opt+or-opt: ' + kmOpt.toFixed(1) + ' km · −' + saved.toFixed(1) + ' km');
+  }
 
   // ── DEBUG: final optimized route ──────────────────────────────────────────
   console.group('RouteOps DEBUG — final optimized route');
@@ -808,6 +955,7 @@ async function runOptimization(txt, demoStops) {
   });
 
   R = fullRoute;
+  saveRouteToStorage();
   showResults(R, kmOpt, saved, Math.round(minOpt));
 }
 
@@ -934,7 +1082,8 @@ function nnFromMatrix(startIdx, remaining, mat) {
   return route;
 }
 
-function twoOptMatrix(route, mat) {
+function twoOptMatrix(route, mat, fromIdx) {
+  fromIdx = fromIdx !== undefined ? fromIdx : 0;
   var best = route.slice();
   var improved = true, iters = 0, totalImp = 0;
   var n = best.length;
@@ -943,8 +1092,8 @@ function twoOptMatrix(route, mat) {
     iters++;
     for (var i = 0; i < n - 1; i++) {
       for (var j = i + 2; j < n; j++) {
-        var pi  = i === 0 ? 0 : best[i - 1];
-        var nj  = j === n - 1 ? 0 : best[j + 1];
+        var pi  = i === 0 ? fromIdx : best[i - 1];
+        var nj  = j === n - 1 ? fromIdx : best[j + 1];
         var bi  = best[i];
         var bj  = best[j];
         var before = ((mat[pi] || [])[bi] || 0) + ((mat[bj] || [])[nj] || 0);
@@ -1016,6 +1165,82 @@ function hav(a, b, c, d) {
 function fmtMin(m) {
   var h = Math.floor(m / 60), mn = m % 60;
   return h > 0 ? '~' + h + 'h ' + mn + ' min desde salida' : '~' + mn + ' min desde salida';
+}
+
+// ════════════════════════════════════════
+// MULTI-CITY GROUPING
+// ════════════════════════════════════════
+
+// Argentine provinces — used to skip them when extracting locality
+var AR_PROVINCES = /^(buenos aires|santa fe|c[oó]rdoba|mendoza|tucum[aá]n|salta|jujuy|neuqu[eé]n|r[ií]o negro|chubut|santa cruz|tierra del fuego|misiones|corrientes|formosa|chaco|entre r[ií]os|san juan|san luis|la rioja|catamarca|santiago del estero|la pampa|ciudad aut[oó]noma de buenos aires|caba)$/i;
+
+function extractLocality(addr) {
+  if (!addr) return '';
+  var parts = addr.split(',').map(function(p) { return p.trim(); });
+  for (var i = 1; i < parts.length; i++) {
+    var p = parts[i];
+    if (!p || p.length < 3) continue;
+    if (/^\d{4,}$/.test(p)) continue;          // postal code
+    if (/^argentina$/i.test(p)) continue;
+    if (AR_PROVINCES.test(p)) continue;
+    return p.toLowerCase();
+  }
+  return (parts[0] || '').toLowerCase();
+}
+
+function groupByLocality(withCoords) {
+  var groups = {};
+  withCoords.forEach(function(s, i) {
+    var city = extractLocality(s.resolvedAddress || s.address) || 'sin-ciudad';
+    if (!groups[city]) groups[city] = {name: city, indices: []};
+    groups[city].indices.push(i + 1); // 1-based matrix index
+  });
+  return groups;
+}
+
+function groupCentroid(indices, withCoords) {
+  var lat = 0, lng = 0;
+  indices.forEach(function(idx) { lat += withCoords[idx - 1].lat; lng += withCoords[idx - 1].lng; });
+  return {lat: lat / indices.length, lng: lng / indices.length};
+}
+
+function orderGroupsByProximity(groupsMap, withCoords) {
+  var groups = Object.keys(groupsMap).map(function(k) {
+    var g = groupsMap[k];
+    return {name: k, indices: g.indices, centroid: groupCentroid(g.indices, withCoords)};
+  });
+  // NN on group centroids starting from depot
+  var ordered = [], rem = groups.slice();
+  var curLat = DEPOT.lat, curLng = DEPOT.lng;
+  while (rem.length) {
+    var best = 0, bestDist = Infinity;
+    rem.forEach(function(g, i) {
+      var d = hav(curLat, curLng, g.centroid.lat, g.centroid.lng);
+      if (d < bestDist) { bestDist = d; best = i; }
+    });
+    ordered.push(rem[best]);
+    curLat = rem[best].centroid.lat;
+    curLng = rem[best].centroid.lng;
+    rem.splice(best, 1);
+  }
+  return ordered;
+}
+
+function optimizeGroups(withCoords, distMatrix) {
+  var groupsMap = groupByLocality(withCoords);
+  if (Object.keys(groupsMap).length <= 1) return null;
+
+  var ordered = orderGroupsByProximity(groupsMap, withCoords);
+  var optRoute = [], fromIdx = 0;
+
+  ordered.forEach(function(group) {
+    var gr = nnFromMatrix(fromIdx, group.indices.slice(), distMatrix);
+    gr = twoOptMatrix(gr, distMatrix, fromIdx).route;
+    optRoute = optRoute.concat(gr);
+    fromIdx = gr[gr.length - 1];
+  });
+
+  return optRoute;
 }
 
 // ════════════════════════════════════════
@@ -1579,7 +1804,7 @@ function navNext() {
 function doneNext() {
   var n = R.filter(function(s) { return !s.isDepot; }).find(function(s) { return !s.done; });
   if (!n) return;
-  n.done = true; drawMap(); renderHome();
+  n.done = true; drawMap(); renderHome(); saveRouteToStorage();
   showToast(n.name + ' — entregado', 'ok');
 }
 
@@ -1712,7 +1937,7 @@ function detOk() {
   document.getElementById('b-ok').className = 'stb ok';
   document.getElementById('b-fail').className = 'stb';
   showToast('Entrega registrada ✓', 'ok');
-  drawMap();
+  drawMap(); saveRouteToStorage();
   setTimeout(function() { go('scr-stops'); }, 1200);
 }
 function detFail() {
@@ -1720,6 +1945,7 @@ function detFail() {
   R[detIdx].failed = true;
   document.getElementById('b-fail').className = 'stb fl';
   showToast('Marcado: no entregado', 'err');
+  saveRouteToStorage();
 }
 function navDetail() { if (detIdx >= 0) navTo(R[detIdx]); }
 function navTo(s) {
@@ -1769,6 +1995,30 @@ function resetSteps() {
 }
 
 // ════════════════════════════════════════
+// ROUTE PERSISTENCE
+// ════════════════════════════════════════
+var ROUTE_STORAGE_KEY = 'routeops_route_v1';
+
+function saveRouteToStorage() {
+  if (!R.length) return;
+  try {
+    localStorage.setItem(ROUTE_STORAGE_KEY, JSON.stringify({route: R, depot: DEPOT}));
+  } catch(e) {}
+}
+
+function loadRouteFromStorage() {
+  try {
+    var raw = localStorage.getItem(ROUTE_STORAGE_KEY);
+    if (!raw) return false;
+    var data = JSON.parse(raw);
+    if (!data.route || !data.route.length) return false;
+    R = data.route;
+    DEPOT = data.depot || null;
+    return true;
+  } catch(e) { return false; }
+}
+
+// ════════════════════════════════════════
 // UTILS
 // ════════════════════════════════════════
 function sleep(ms) { return new Promise(function(r) { setTimeout(r, ms); }); }
@@ -1784,3 +2034,19 @@ function showToast(msg, type) {
   t.classList.add('show');
   setTimeout(function() { t.classList.remove('show'); }, 3200);
 }
+
+// ════════════════════════════════════════
+// INIT
+// ════════════════════════════════════════
+
+// Seed history so the device back button navigates within the app
+// (e.g. after returning from Google Maps navigation)
+history.replaceState({screen: 'scr-home'}, '', '');
+
+// Restore last active route from localStorage
+(function() {
+  if (loadRouteFromStorage() && R.length) {
+    renderHome();
+    setTimeout(function() { showToast('Ruta anterior restaurada', 'ok'); }, 600);
+  }
+})();

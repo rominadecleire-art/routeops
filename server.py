@@ -104,6 +104,64 @@ def extract_addresses():
     return jsonify({'text': text, 'stops': []})
 
 
+# ── Image OCR via Claude Vision ───────────────────────────────────────────────
+
+@app.route('/api/extract-image', methods=['POST'])
+def extract_image():
+    if 'image' not in request.files:
+        return jsonify({'error': 'Falta el archivo de imagen (campo "image")'}), 400
+
+    file = request.files['image']
+    api_key = os.environ.get('ANTHROPIC_API_KEY')
+    if not api_key:
+        return jsonify({'error': 'ANTHROPIC_API_KEY no configurada en el servidor'}), 503
+
+    # Determine media type — Claude Vision supports jpeg/png/gif/webp
+    import base64, mimetypes
+    allowed = {'image/jpeg', 'image/png', 'image/gif', 'image/webp'}
+    media_type = file.content_type or ''
+    if media_type not in allowed and file.filename:
+        media_type = mimetypes.guess_type(file.filename)[0] or ''
+    if media_type not in allowed:
+        media_type = 'image/jpeg'
+
+    image_data = base64.standard_b64encode(file.read()).decode('utf-8')
+
+    try:
+        import anthropic
+        client = anthropic.Anthropic(api_key=api_key)
+        response = client.messages.create(
+            model='claude-sonnet-4-6',
+            max_tokens=2000,
+            messages=[{
+                'role': 'user',
+                'content': [
+                    {
+                        'type': 'image',
+                        'source': {'type': 'base64', 'media_type': media_type, 'data': image_data},
+                    },
+                    {
+                        'type': 'text',
+                        'text': (
+                            'Extraé TODAS las direcciones de entrega visibles en esta imagen. '
+                            'Devolvé SOLO JSON sin texto extra:\n'
+                            '{"stops":[{"name":"Nombre o descripción del destinatario","address":"Dirección completa, Ciudad, Provincia, Argentina"}]}\n'
+                            'Si no aparece ciudad, inferí la más mencionada en la imagen.\n'
+                            'Si la imagen es ilegible o no hay direcciones: {"stops":[]}'
+                        ),
+                    },
+                ],
+            }],
+        )
+        raw = response.content[0].text.strip().replace('```json', '').replace('```', '').strip()
+        data = json.loads(raw)
+        return jsonify({'stops': data.get('stops', [])})
+    except json.JSONDecodeError:
+        return jsonify({'error': 'Claude no devolvió JSON válido'}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 # ── Health check ──────────────────────────────────────────────────────────────
 
 @app.route('/api/health')
