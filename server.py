@@ -185,12 +185,14 @@ def _parse_scanned_pdf_page_by_page(client, page_images):
         except Exception as e:
             log.error('  Página %d: error — %s\n%s', i + 1, e, traceback.format_exc())
 
-    # Deduplicate by normalized address across all pages
+    # Deduplicate by name+address (allows same address with different names)
     seen = set()
     unique = []
     for s in all_stops:
-        key = (s.get('address') or '').lower().strip()
-        if key and key not in seen:
+        if not s.get('name') and not s.get('address'):
+            continue
+        key = ((s.get('name') or '') + '|' + (s.get('address') or '')).lower().strip()
+        if key not in seen:
             seen.add(key)
             unique.append(s)
 
@@ -249,46 +251,47 @@ def extract_pdf():
     client = _claude_client()
     log.info('ANTHROPIC_API_KEY: %s', 'configurada' if client else 'NO configurada')
 
-    # ── 2. Fallback Vision si el texto es insuficiente (PDF escaneado) ─────────
-    if text_len < 50:
-        log.info('Texto insuficiente (%d chars) — PDF probablemente escaneado, activando Vision', text_len)
-
-        if not client:
-            log.warning('Vision fallback imposible: sin ANTHROPIC_API_KEY')
-            return jsonify({
-                'error': 'PDF escaneado detectado. Configurá ANTHROPIC_API_KEY en Ajustes para procesar este tipo de PDF.'
-            }), 503
-
+    # ── 2. PRIMARY: Vision página a página (siempre, cuando PyMuPDF disponible) ─
+    if client:
         page_images = _pdf_to_page_images(pdf_bytes)
-        if not page_images:
+        if page_images:
+            try:
+                stops = _parse_scanned_pdf_page_by_page(client, page_images)
+            except Exception as e:
+                tb = traceback.format_exc()
+                log.error('Vision falló: %s\n%s', e, tb)
+                if text_len < 50:
+                    return jsonify({
+                        'error': f'Error procesando PDF con Vision: {str(e)}',
+                        'exception_type': type(e).__name__,
+                        'traceback': tb,
+                    }), 500
+                stops = []
+
+            if stops:
+                log.info('Vision OK: %d paradas en %d páginas', len(stops), len(page_images))
+                return jsonify({'stops': stops, 'scanned': True, 'pages_processed': len(page_images)})
+
+            if text_len < 50:
+                log.warning('Vision procesó %d páginas sin encontrar paradas (sin texto de respaldo)', len(page_images))
+                return jsonify({
+                    'error': (
+                        f'Claude Vision analizó {len(page_images)} página(s) pero no encontró direcciones. '
+                        'Verificá que el PDF tenga columnas Destinatario/Domicilio visibles.'
+                    )
+                }), 422
+            log.warning('Vision procesó %d páginas sin encontrar paradas — reintentando con texto', len(page_images))
+        elif text_len < 50:
             return jsonify({
                 'error': 'PDF escaneado sin texto. Instalá pymupdf en el servidor (pip install pymupdf) para activar OCR.'
             }), 400
+    elif text_len < 50:
+        log.warning('Vision imposible: sin ANTHROPIC_API_KEY')
+        return jsonify({
+            'error': 'PDF escaneado detectado. Configurá ANTHROPIC_API_KEY en Ajustes para procesar este tipo de PDF.'
+        }), 503
 
-        try:
-            stops = _parse_scanned_pdf_page_by_page(client, page_images)
-        except Exception as e:
-            tb = traceback.format_exc()
-            log.error('Vision falló: %s\n%s', e, tb)
-            return jsonify({
-                'error': f'Error procesando PDF escaneado con Vision: {str(e)}',
-                'exception_type': type(e).__name__,
-                'traceback': tb,
-            }), 500
-
-        if not stops:
-            log.warning('Vision procesó %d página(s) pero no encontró paradas', len(page_images))
-            return jsonify({
-                'error': (
-                    f'Claude Vision analizó {len(page_images)} página(s) pero no encontró direcciones. '
-                    'Verificá que el PDF tenga columnas Destinatario/Domicilio visibles.'
-                )
-            }), 422
-
-        log.info('Vision OK: %d paradas en %d páginas', len(stops), len(page_images))
-        return jsonify({'stops': stops, 'scanned': True, 'pages_processed': len(page_images)})
-
-    # ── 3. Parsear texto con Claude ────────────────────────────────────────────
+    # ── 3. Fallback: parsear texto con Claude ──────────────────────────────────
     if client:
         try:
             stops = _parse_stops_from_text(client, text)

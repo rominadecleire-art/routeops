@@ -949,7 +949,7 @@ async function runOptimization(txt, demoStops) {
   }
 
   // ── Detect multi-city ────────────────────────────────────────────────────────
-  var groupsMap = groupByLocality(withCoords);
+  var groupsMap = clusterByCity(withCoords);
   var groupKeys = Object.keys(groupsMap);
   var isMultiCity = groupKeys.length > 1;
 
@@ -1349,6 +1349,53 @@ function groupByLocality(withCoords) {
   return groups;
 }
 
+// Cluster stops by geographic proximity: stops within RADIUS_KM = same city.
+// More reliable than text-based locality extraction when address format varies.
+function clusterByCity(withCoords) {
+  var RADIUS_KM = 15;
+  var clusters = []; // [{name, lat, lng, count, indices}]
+
+  withCoords.forEach(function(s, i) {
+    var idx = i + 1;
+    var nameFromAddr = extractLocality(s.resolvedAddress || s.address) || '';
+
+    if (!s.lat || !s.lng) {
+      var label = nameFromAddr || 'sin-ciudad';
+      var found = null;
+      clusters.forEach(function(c) { if (c.name === label) found = c; });
+      if (found) { found.indices.push(idx); }
+      else { clusters.push({name: label, lat: null, lng: null, count: 1, indices: [idx]}); }
+      return;
+    }
+
+    var bestC = null, bestD = Infinity;
+    clusters.forEach(function(c) {
+      if (c.lat === null) return;
+      var d = hav(s.lat, s.lng, c.lat, c.lng);
+      if (d < bestD) { bestD = d; bestC = c; }
+    });
+
+    if (bestC && bestD < RADIUS_KM) {
+      bestC.indices.push(idx);
+      bestC.count++;
+      // Incremental centroid update
+      bestC.lat = bestC.lat + (s.lat - bestC.lat) / bestC.count;
+      bestC.lng = bestC.lng + (s.lng - bestC.lng) / bestC.count;
+    } else {
+      var label = nameFromAddr || ('ciudad-' + (clusters.length + 1));
+      clusters.push({name: label, lat: s.lat, lng: s.lng, count: 1, indices: [idx]});
+    }
+  });
+
+  var groupsMap = {};
+  clusters.forEach(function(c) {
+    var key = c.name, n = 2;
+    while (groupsMap[key]) { key = c.name + '-' + n++; }
+    groupsMap[key] = {name: key, indices: c.indices};
+  });
+  return groupsMap;
+}
+
 function groupCentroid(indices, withCoords) {
   var lat = 0, lng = 0;
   indices.forEach(function(idx) { lat += withCoords[idx - 1].lat; lng += withCoords[idx - 1].lng; });
@@ -1378,7 +1425,7 @@ function orderGroupsByProximity(groupsMap, withCoords) {
 }
 
 function optimizeGroups(withCoords, distMatrix) {
-  var groupsMap = groupByLocality(withCoords);
+  var groupsMap = clusterByCity(withCoords);
   if (Object.keys(groupsMap).length <= 1) return null;
 
   var ordered = orderGroupsByProximity(groupsMap, withCoords);
