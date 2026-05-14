@@ -74,7 +74,8 @@ CLAUDE_MODEL = 'claude-sonnet-4-6'
 ADDRESS_PROMPT = (
     'Extraé TODAS las direcciones de entrega. '
     'Devolvé SOLO JSON sin texto extra:\n'
-    '{"stops":[{"name":"Nombre cliente","address":"Dirección completa, Ciudad, Provincia, Argentina"}]}\n'
+    '{"stops":[{"name":"Nombre cliente","address":"Dirección completa, CPXXXX Ciudad, Provincia, Argentina"}]}\n'
+    'IMPORTANTE: Si hay un código postal de 4 dígitos (ej: 2627, 2622, 2650), incluilo ANTES del nombre de ciudad.\n'
     'Si no tiene ciudad, usá "Venado Tuerto, Santa Fe, Argentina".'
 )
 
@@ -89,22 +90,25 @@ SCANNED_PDF_PROMPT = (
     'Las columnas pueden llamarse:\n'
     '  • Destinatario / Cliente / Nombre / Receptor\n'
     '  • Domicilio / Dirección / Calle / Entrega\n'
-    '  • Localidad / Ciudad / Partido / Zona / Barrio\n'
+    '  • Localidad / Ciudad / Partido / Zona / Barrio / CP / Código Postal\n'
     '\n'
     'Por cada fila con datos (aunque esté incompleta), generá una entrada:\n'
     '  - name: contenido de la columna Destinatario/Cliente/Nombre\n'
-    '  - address: Calle Número, Localidad, Provincia, Argentina\n'
+    '  - address: Calle Número, CPXXXX Localidad, Provincia, Argentina\n'
+    '    donde CPXXXX es el código postal de 4 dígitos SI está visible (ej: 2627, 2622)\n'
+    '    Si no hay código postal visible, omitilo: Calle Número, Localidad, Provincia, Argentina\n'
     '\n'
     'Reglas ESTRICTAS:\n'
     '- NUNCA omitás una fila que tenga al menos calle o destinatario.\n'
     '- Si una fila no tiene localidad, usá la localidad más repetida en la página.\n'
+    '- Si hay código postal en la tabla (columna CP, columna Localidad o encabezado de sección), incluilo.\n'
     '- Si hay Piso/Depto/Unidad, incluilo en la dirección.\n'
     '- Si el número de calle no está claro, escribilo como aparece (aunque sea ilegible).\n'
     '- Omití SOLO filas completamente vacías y encabezados de columna.\n'
     '- Si la página no tiene datos de entrega: {"stops":[]}\n'
     '\n'
     'Devolvé SOLO este JSON, sin texto extra, sin markdown, sin explicaciones:\n'
-    '{"stops":[{"name":"Nombre destinatario","address":"Calle Número, Localidad, Provincia, Argentina"}]}'
+    '{"stops":[{"name":"Nombre destinatario","address":"Calle Número, CPXXXX Localidad, Provincia, Argentina"}]}'
 )
 
 

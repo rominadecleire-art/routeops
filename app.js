@@ -975,7 +975,7 @@ async function runOptimization(txt, demoStops) {
   }
 
   // ── Detect multi-city ────────────────────────────────────────────────────────
-  var groupsMap = clusterByCity(withCoords);
+  var groupsMap = clusterByPostalCode(withCoords);
   var groupKeys = Object.keys(groupsMap);
   var isMultiCity = groupKeys.length > 1;
 
@@ -1396,6 +1396,16 @@ function capitalizeWords(s) {
 // Argentine provinces — used to skip them when extracting locality
 var AR_PROVINCES = /^(buenos aires|santa fe|c[oó]rdoba|mendoza|tucum[aá]n|salta|jujuy|neuqu[eé]n|r[ií]o negro|chubut|santa cruz|tierra del fuego|misiones|corrientes|formosa|chaco|entre r[ií]os|san juan|san luis|la rioja|catamarca|santiago del estero|la pampa|ciudad aut[oó]noma de buenos aires|caba)$/i;
 
+// Returns the 4-digit Argentine postal code from addr, or '' if not found.
+// Skips the first comma-segment (street + house number) to avoid matching house numbers.
+function extractPostalCode(addr) {
+  if (!addr) return '';
+  var commaIdx = addr.indexOf(',');
+  var searchIn = commaIdx >= 0 ? addr.slice(commaIdx + 1) : addr;
+  var m = searchIn.match(/\b(\d{4})\b/);
+  return m ? m[1] : '';
+}
+
 function extractLocality(addr) {
   if (!addr) return '';
   var parts = addr.split(',').map(function(p) { return p.trim(); });
@@ -1420,21 +1430,15 @@ function groupByLocality(withCoords) {
   return groups;
 }
 
-// Group stops by city.  Strategy (in order of priority):
-//   1. Text locality extracted from address — most reliable for Argentine delivery sheets.
-//   2. Coordinate proximity (5 km radius) — fallback when text city is absent or looks like a street.
-function clusterByCity(withCoords) {
+// Group stops by postal code (primary) → city name (fallback) → geo proximity (last resort).
+// Returns groupsMap: {label: {name: label, indices: [1-based]}}
+function clusterByPostalCode(withCoords) {
   var GEO_RADIUS_KM = 5;
-  var clusters = []; // {name, lat, lng, count, indices}
+  var clusters = []; // {key, name, lat, lng, count, indices}
 
-  function isValidCity(s) {
-    // Reject if it looks like a street ("Rivadavia 500"), starts with digit, or too short
-    return s && s.length >= 3 && !/^\d/.test(s) && !/\d{3,}/.test(s);
-  }
-
-  function findByName(name) {
+  function findByKey(key) {
     for (var i = 0; i < clusters.length; i++) {
-      if (clusters[i].name === name) return clusters[i];
+      if (clusters[i].key === key) return clusters[i];
     }
     return null;
   }
@@ -1447,24 +1451,38 @@ function clusterByCity(withCoords) {
     }
   }
 
+  function isValidCity(s) {
+    return s && s.length >= 3 && !/^\d/.test(s) && !/\d{3,}/.test(s);
+  }
+
   withCoords.forEach(function(s, i) {
     var idx = i + 1;
-    // Try text locality from original address first, then resolved address
-    var textCity = extractLocality(s.address) || extractLocality(s.resolvedAddress || '') || '';
-    var useText = isValidCity(textCity);
+    var cp   = extractPostalCode(s.address) || extractPostalCode(s.resolvedAddress || '');
+    var city = extractLocality(s.address)   || extractLocality(s.resolvedAddress || '') || '';
 
-    if (useText) {
-      var c = findByName(textCity);
+    var key, label;
+    if (cp) {
+      key   = 'cp:' + cp;
+      label = 'CP ' + cp + (isValidCity(city) ? ' · ' + capitalizeWords(city) : '');
+    } else if (isValidCity(city)) {
+      key   = 'city:' + city;
+      label = capitalizeWords(city);
+    } else {
+      key = null;
+    }
+
+    if (key) {
+      var c = findByKey(key);
       if (c) {
         c.indices.push(idx);
         updateCentroid(c, s.lat, s.lng);
       } else {
-        clusters.push({name: textCity, lat: s.lat || null, lng: s.lng || null, count: 1, indices: [idx]});
+        clusters.push({key: key, name: label, lat: s.lat || null, lng: s.lng || null, count: 1, indices: [idx]});
       }
       return;
     }
 
-    // Fallback: coordinate clustering (5 km)
+    // Geo fallback (5 km radius)
     if (s.lat && s.lng) {
       var bestC = null, bestD = Infinity;
       clusters.forEach(function(c) {
@@ -1476,20 +1494,21 @@ function clusterByCity(withCoords) {
         bestC.indices.push(idx);
         updateCentroid(bestC, s.lat, s.lng);
       } else {
-        clusters.push({name: textCity || ('zona-' + (clusters.length + 1)), lat: s.lat, lng: s.lng, count: 1, indices: [idx]});
+        var autoLabel = 'Zona ' + (clusters.length + 1);
+        clusters.push({key: 'geo:' + clusters.length, name: autoLabel, lat: s.lat, lng: s.lng, count: 1, indices: [idx]});
       }
     } else {
-      var c = findByName('sin-ciudad');
-      if (c) { c.indices.push(idx); }
-      else { clusters.push({name: 'sin-ciudad', lat: null, lng: null, count: 1, indices: [idx]}); }
+      var none = findByKey('none');
+      if (none) { none.indices.push(idx); }
+      else { clusters.push({key: 'none', name: 'Sin código', lat: null, lng: null, count: 1, indices: [idx]}); }
     }
   });
 
   var groupsMap = {};
   clusters.forEach(function(c) {
-    var key = c.name, n = 2;
-    while (groupsMap[key]) { key = c.name + '-' + n++; }
-    groupsMap[key] = {name: key, indices: c.indices};
+    var k = c.name, n = 2;
+    while (groupsMap[k]) { k = c.name + '-' + n++; }
+    groupsMap[k] = {name: k, indices: c.indices};
   });
   return groupsMap;
 }
@@ -1523,7 +1542,7 @@ function orderGroupsByProximity(groupsMap, withCoords) {
 }
 
 function optimizeGroups(withCoords, distMatrix) {
-  var groupsMap = clusterByCity(withCoords);
+  var groupsMap = clusterByPostalCode(withCoords);
   if (Object.keys(groupsMap).length <= 1) return null;
 
   var ordered = orderGroupsByProximity(groupsMap, withCoords);
