@@ -124,6 +124,7 @@
         <div class="drow"><i class="ti ti-route dico"></i><div><div class="dtxt" id="d-dist">—</div><div class="dtxt2">Distancia real por ruta (OSRM)</div></div></div>
         <div class="drow"><i class="ti ti-clock dico"></i><div><div class="dtxt" id="d-dur">—</div><div class="dtxt2">Duración estimada del tramo</div></div></div>
         <div class="drow"><i class="ti ti-clock-2 dico"></i><div><div class="dtxt" id="d-eta">—</div><div class="dtxt2">Tiempo acumulado desde salida</div></div></div>
+        <div class="drow" id="d-deadline-row" style="display:none"><i class="ti ti-clock-hour-4 dico" style="color:#f59e0b"></i><div><div class="dtxt" id="d-deadline" style="color:#f59e0b">—</div><div class="dtxt2">Horario límite de entrega</div></div></div>
         <div class="drow"><i class="ti ti-hash dico"></i><div><div class="dtxt" id="d-ord">—</div></div></div>
       </div>
       <button class="navbtn" onclick="navDetail()"><i class="ti ti-navigation"></i> Navegar con Google Maps</button>
@@ -350,6 +351,19 @@
         <div class="mbox">
           <textarea id="mtxt" placeholder="Escribí o pegá las direcciones, una por línea:&#10;&#10;Rivadavia 567, Venado Tuerto&#10;Belgrano 900, Venado Tuerto&#10;Corrientes 1234, Rosario..."></textarea>
         </div>
+      </div>
+
+      <!-- CIUDAD PARA PDF/IMAGEN -->
+      <div id="extract-city-wrap" style="display:none;margin-top:8px">
+        <div style="background:#0c1c2e;border:1px solid #1e3a5f;border-radius:13px;padding:11px 14px;display:flex;align-items:center;gap:10px">
+          <i class="ti ti-map-pin-2" style="color:#60a5fa;font-size:17px;flex-shrink:0"></i>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:10px;color:#475569;margin-bottom:3px;font-weight:700;letter-spacing:.06em;text-transform:uppercase">Ciudad de las direcciones</div>
+            <input id="extract-city-inp" type="text" placeholder="Ej: Venado Tuerto"
+              style="width:100%;background:transparent;border:none;outline:none;font-size:13px;color:#e2e8f0;font-family:'DM Sans',sans-serif;padding:0">
+          </div>
+        </div>
+        <div style="color:#475569;font-size:11px;margin-top:4px;padding-left:2px">Opcional &middot; Se agrega a direcciones sin ciudad para geocodificar correctamente</div>
       </div>
 
       <!-- AGREGAR INDIVIDUAL (siempre visible) -->

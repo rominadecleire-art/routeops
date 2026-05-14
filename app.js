@@ -96,6 +96,7 @@ var detIdx = -1;
 var mainMap = null, miniMap = null, routePolys = [], mapMarkers = [];
 var distMatrix = [], durMatrix = [];
 var pendingImages = [];
+var extractCity = '';
 
 var SAVED = [
   {name:'Depósito Pardal',  address:'Pardal 267, Venado Tuerto, Santa Fe, Argentina',    lat:-33.7540455, lng:-61.9449982},
@@ -200,6 +201,9 @@ function startWizard() {
   pendingImages = [];
   ['fi-cam','fi-gal'].forEach(function(id) { var el=document.getElementById(id); if(el) el.value=''; });
   renderImageList();
+  extractCity = '';
+  var ecInp = document.getElementById('extract-city-inp');
+  if (ecInp) ecInp.value = '';
   var depOk = document.getElementById('dep-ok');
   if (depOk) depOk.classList.remove('on');
   var audioRes = document.getElementById('audio-result');
@@ -562,6 +566,8 @@ function switchMethod(m) {
     if (tab) tab.classList.toggle('act', x === m);
     if (panel) panel.style.display = x === m ? 'block' : 'none';
   });
+  var ecWrap = document.getElementById('extract-city-wrap');
+  if (ecWrap) ecWrap.style.display = (m === 'pdf' || m === 'image') ? 'block' : 'none';
   if (m === 'audio') initAudio();
 }
 
@@ -917,6 +923,20 @@ async function runOptimization(txt, demoStops) {
     return;
   }
 
+  // Apply city context: append city to addresses that lack one (no comma present)
+  var ecInp = document.getElementById('extract-city-inp');
+  var ec = ecInp ? ecInp.value.trim() : '';
+  if (ec) {
+    stops = stops.map(function(s) {
+      if (!s.address) return s;
+      var addr = s.address.trim();
+      if (addr.indexOf(',') === -1 && addr.toLowerCase().indexOf(ec.toLowerCase()) === -1) {
+        addr = addr + ', ' + ec;
+      }
+      return Object.assign({}, s, {address: addr});
+    });
+  }
+
   step(2, 'r', 'Geocodificando ' + stops.length + ' paradas...');
   // Pre-cache city center so geocodeFull can use it as silent fallback
   if (CONFIG.baseCity && !baseCityCenter) await getBaseCityCenter();
@@ -941,6 +961,13 @@ async function runOptimization(txt, demoStops) {
     showWS(2);
     return;
   }
+
+  // Sort: deadline stops first (by time ascending), then normal stops
+  var _prio = withCoords.filter(function(s) { return !!s.deadline; });
+  var _norm = withCoords.filter(function(s) { return !s.deadline; });
+  _prio.sort(function(a, b) { return (a.deadline || '').localeCompare(b.deadline || ''); });
+  withCoords = _prio.concat(_norm);
+  var nPriority = _prio.length;
 
   var allPts = [DEPOT].concat(withCoords);
   var OSRM_CHUNK = 15;
@@ -1011,41 +1038,86 @@ async function runOptimization(txt, demoStops) {
     step(5, 'ok', 'Multi-zona NN+2-opt: ' + kmOpt.toFixed(1) + ' km · −' + saved.toFixed(1) + ' km');
 
   } else {
-    // ── Single-city path (original) ───────────────────────────────────────────
-    step(4, 'r', 'Nearest neighbor desde punto de salida...');
-    await sleep(200);
-    seedRoute = nnFromMatrix(0, indices, distMatrix);
-    kmSeed = routeDistKm(seedRoute, distMatrix);
-    step(4, 'ok', 'Ruta inicial: ' + kmSeed.toFixed(1) + ' km');
+    // ── Single-city path ─────────────────────────────────────────────────────
 
-    // ── DEBUG: NN seed route ────────────────────────────────────────────────
-    console.group('RouteOps DEBUG — NN seed route');
-    console.log('0:' + DEPOT.name + ' (depot)');
-    seedRoute.forEach(function(idx, pos) {
-      var s = withCoords[idx - 1];
-      var d = ((distMatrix[pos === 0 ? 0 : seedRoute[pos - 1]] || [])[idx] || 0);
-      console.log((pos + 1) + '. [mat:' + idx + '] ' + s.name + ' — ' + Math.round(d) + 'm from prev');
-    });
-    console.log('Total NN: ' + kmSeed.toFixed(3) + ' km (round-trip)');
-    console.groupEnd();
+    if (nPriority > 0) {
+      // ── Priority-aware: deadlined stops first, then normal stops ─────────────
+      var pIdxs = indices.slice(0, nPriority);
+      var nIdxs = indices.slice(nPriority);
 
-    if (withCoords.length > 25) {
-      // NN only for large routes — 2-opt on 25+ nodes is slow on mobile
-      optRoute = seedRoute;
-      kmOpt  = kmSeed;
-      minOpt = routeDurMin(optRoute, durMatrix);
-      saved  = 0;
-      step(5, 'ok', 'NN (ruta grande): ' + kmOpt.toFixed(1) + ' km');
-    } else {
-      step(5, 'r', 'Aplicando 2-opt + or-opt...');
+      step(4, 'r', nPriority + ' parada' + (nPriority !== 1 ? 's' : '') + ' con horario límite · priorizando...');
       await sleep(200);
-      var twoOptResult = twoOptMatrix(seedRoute, distMatrix);
-      var orOptResult  = orOpt1(twoOptResult.route, distMatrix);
-      optRoute = orOptResult.route;
+
+      var pRoute;
+      if (pIdxs.length === 1) {
+        pRoute = pIdxs.slice();
+      } else {
+        pRoute = nnFromMatrix(0, pIdxs.slice(), distMatrix);
+        if (pIdxs.length <= 25) pRoute = twoOptMatrix(pRoute, distMatrix, 0).route;
+      }
+      kmSeed = routeDistKm(pRoute, distMatrix);
+      step(4, 'ok', nPriority + ' prioritaria' + (nPriority !== 1 ? 's' : '') + ' al inicio · ' + kmSeed.toFixed(1) + ' km');
+
+      step(5, 'r', 'Optimizando ' + nIdxs.length + ' parada' + (nIdxs.length !== 1 ? 's' : '') + ' restante' + (nIdxs.length !== 1 ? 's' : '') + '...');
+      await sleep(200);
+
+      var fromP = pRoute.length ? pRoute[pRoute.length - 1] : 0;
+      var nRoute;
+      if (nIdxs.length === 0) {
+        nRoute = [];
+      } else if (nIdxs.length === 1) {
+        nRoute = nIdxs.slice();
+      } else if (nIdxs.length > 25) {
+        nRoute = nnFromMatrix(fromP, nIdxs.slice(), distMatrix);
+      } else {
+        nRoute = nnFromMatrix(fromP, nIdxs.slice(), distMatrix);
+        nRoute = twoOptMatrix(nRoute, distMatrix, fromP).route;
+        nRoute = orOpt1(nRoute, distMatrix).route;
+      }
+
+      optRoute = pRoute.concat(nRoute);
+      seedRoute = optRoute;
       kmOpt  = routeDistKm(optRoute, distMatrix);
       minOpt = routeDurMin(optRoute, durMatrix);
-      saved  = kmSeed - kmOpt;
-      step(5, 'ok', '2-opt+or-opt: ' + kmOpt.toFixed(1) + ' km · −' + saved.toFixed(1) + ' km');
+      saved  = 0;
+      step(5, 'ok', 'Horarios respetados · ' + kmOpt.toFixed(1) + ' km total');
+
+    } else {
+      // ── Standard: no priority stops ─────────────────────────────────────────
+      step(4, 'r', 'Nearest neighbor desde punto de salida...');
+      await sleep(200);
+      seedRoute = nnFromMatrix(0, indices, distMatrix);
+      kmSeed = routeDistKm(seedRoute, distMatrix);
+      step(4, 'ok', 'Ruta inicial: ' + kmSeed.toFixed(1) + ' km');
+
+      // ── DEBUG: NN seed route ──────────────────────────────────────────────
+      console.group('RouteOps DEBUG — NN seed route');
+      console.log('0:' + DEPOT.name + ' (depot)');
+      seedRoute.forEach(function(idx, pos) {
+        var s = withCoords[idx - 1];
+        var d = ((distMatrix[pos === 0 ? 0 : seedRoute[pos - 1]] || [])[idx] || 0);
+        console.log((pos + 1) + '. [mat:' + idx + '] ' + s.name + ' — ' + Math.round(d) + 'm from prev');
+      });
+      console.log('Total NN: ' + kmSeed.toFixed(3) + ' km (round-trip)');
+      console.groupEnd();
+
+      if (withCoords.length > 25) {
+        optRoute = seedRoute;
+        kmOpt  = kmSeed;
+        minOpt = routeDurMin(optRoute, durMatrix);
+        saved  = 0;
+        step(5, 'ok', 'NN (ruta grande): ' + kmOpt.toFixed(1) + ' km');
+      } else {
+        step(5, 'r', 'Aplicando 2-opt + or-opt...');
+        await sleep(200);
+        var twoOptResult = twoOptMatrix(seedRoute, distMatrix);
+        var orOptResult  = orOpt1(twoOptResult.route, distMatrix);
+        optRoute = orOptResult.route;
+        kmOpt  = routeDistKm(optRoute, distMatrix);
+        minOpt = routeDurMin(optRoute, durMatrix);
+        saved  = kmSeed - kmOpt;
+        step(5, 'ok', '2-opt+or-opt: ' + kmOpt.toFixed(1) + ' km · −' + saved.toFixed(1) + ' km');
+      }
     }
   }
 
@@ -1849,23 +1921,41 @@ function renderValList() {
       tag = '<span class="val-tag" style="background:rgba(245,158,11,.1);color:#f59e0b;display:inline-flex;align-items:center;gap:3px;margin-top:4px">' +
         '<i class="ti ti-map-pin-exclamation"></i> Geocodificaci\xf3n aproximada</span>' + pinBtn;
     } else if (s.status === 'failed') {
-      // Only shown when no city is configured — still non-blocking, just offer pin
       tag = '<span class="val-tag warn"><i class="ti ti-map-pin-off"></i> Sin coordenadas exactas</span>' + pinBtn;
     }
     var dist = (s.distFromCenter != null && s.status === 'ok' && s.distFromCenter > 0.2)
       ? '<div class="val-dist">' + s.distFromCenter.toFixed(1) + ' km del centro del grupo</div>' : '';
+    var dlBadge = s.deadline
+      ? '<div style="display:inline-flex;align-items:center;gap:4px;background:rgba(245,158,11,.15);color:#f59e0b;border-radius:6px;padding:3px 8px;font-size:11px;font-weight:600;margin-top:5px">' +
+        '<i class="ti ti-clock-hour-4"></i> antes de las ' + s.deadline + '</div>'
+      : '';
+    var dlStyle = s.deadline ? 'border-left:3px solid #f59e0b;' : '';
+    var dlClearBtn = s.deadline
+      ? '<button onclick="clearDeadline(' + i + ')" style="background:#374151;border:none;border-radius:8px;color:#9ca3af;padding:6px 10px;cursor:pointer;font-size:12px">Quitar</button>'
+      : '';
     el.innerHTML +=
-      '<div class="val-card ' + sc + '" id="vc-' + i + '">' +
+      '<div class="val-card ' + sc + '" id="vc-' + i + '" style="' + dlStyle + '">' +
         '<div class="val-card-top">' +
           '<div class="val-num ' + nc + '">' + (i + 1) + '</div>' +
           '<div class="val-info">' +
             '<div class="val-name">' + s.name + '</div>' +
             '<div class="val-addr">' + (s.resolvedAddress || s.address) + '</div>' +
-            dist + tag +
+            dist + tag + dlBadge +
           '</div>' +
           '<div class="val-btns">' +
+            '<button class="val-btn" onclick="toggleDeadline(' + i + ')" title="Horario l\xedmite" style="' + (s.deadline ? 'color:#f59e0b' : '') + '"><i class="ti ti-clock"></i></button>' +
             '<button class="val-btn" onclick="editValStop(' + i + ')" title="Editar"><i class="ti ti-pencil"></i></button>' +
             '<button class="val-btn val-btn-del" onclick="removeValStop(' + i + ')" title="Eliminar"><i class="ti ti-trash"></i></button>' +
+          '</div>' +
+        '</div>' +
+        '<div id="vdlf-' + i + '" style="display:none;margin-top:8px;background:#0c1c2e;border-radius:10px;padding:10px 12px">' +
+          '<div style="font-size:10px;color:#475569;font-weight:700;letter-spacing:.06em;text-transform:uppercase;margin-bottom:7px">Horario l\xedmite de entrega</div>' +
+          '<div style="display:flex;align-items:center;gap:8px">' +
+            '<span style="font-size:12px;color:#94a3b8;flex-shrink:0">Antes de las</span>' +
+            '<input type="time" id="vdli-' + i + '" value="' + (s.deadline || '12:00') + '" ' +
+              'style="flex:1;background:#162842;border:1px solid #1e3a5f;border-radius:8px;padding:6px 10px;color:#e2e8f0;font-size:14px;font-family:\'DM Sans\',sans-serif;outline:none">' +
+            '<button onclick="confirmDeadline(' + i + ')" style="background:#34d399;border:none;border-radius:8px;color:#000;padding:7px 12px;cursor:pointer;font-size:14px"><i class="ti ti-check"></i></button>' +
+            dlClearBtn +
           '</div>' +
         '</div>' +
         '<div class="val-edit-form" id="vef-' + i + '" style="display:none">' +
@@ -1894,6 +1984,27 @@ function editValStop(i) {
 function cancelEditValStop(i) {
   var f = document.getElementById('vef-' + i);
   if (f) f.style.display = 'none';
+}
+
+function toggleDeadline(i) {
+  var form = document.getElementById('vdlf-' + i);
+  if (!form) return;
+  form.style.display = form.style.display === 'none' ? 'block' : 'none';
+  if (form.style.display === 'block') {
+    setTimeout(function() { var inp = document.getElementById('vdli-' + i); if (inp) inp.focus(); }, 50);
+  }
+}
+
+function confirmDeadline(i) {
+  var inp = document.getElementById('vdli-' + i);
+  if (!inp || !inp.value) return;
+  valStops[i].deadline = inp.value;
+  renderValList();
+}
+
+function clearDeadline(i) {
+  valStops[i].deadline = null;
+  renderValList();
 }
 
 function removeValStop(i) {
@@ -2289,14 +2400,18 @@ function scHTML(i, nxt) {
   var st = dep ? '<span class="tag tamt">Salida</span>'
     : s.done ? '<span class="tag tgr">✓ Entregado</span>'
     : '<span class="tag tgray">Pendiente</span>';
+  var dlTag = (!dep && s.deadline)
+    ? '<span class="tag" style="background:rgba(245,158,11,.2);color:#f59e0b;font-weight:600"><i class="ti ti-clock-hour-4" style="font-size:9px"></i> ' + s.deadline + '</span>'
+    : '';
   var addr = (s.address || '').split(',').slice(0,2).join(',');
   var cityBorder = s.cityColor && !dep ? ' border-left:3px solid ' + s.cityColor + ';' : '';
-  return '<div class="sc ' + cc + '" style="' + cityBorder + '" onclick="openStop(' + i + ')">' +
+  var dlBorder = !dep && s.deadline && !s.cityColor ? ' border-left:3px solid #f59e0b;' : '';
+  return '<div class="sc ' + cc + '" style="' + cityBorder + dlBorder + '" onclick="openStop(' + i + ')">' +
     '<div class="bnum ' + nc + '">' + ni + '</div>' +
     '<div class="sinfo">' +
       '<div class="sinfo-n">' + s.name + '</div>' +
       '<div class="sinfo-a">' + addr + '</div>' +
-      '<div class="sinfo-m">' + dk + dt + st + '</div>' +
+      '<div class="sinfo-m">' + dk + dt + st + dlTag + '</div>' +
     '</div>' +
     '<i class="ti ti-chevron-right" style="color:#2a2a2a;font-size:17px;margin-top:4px"></i>' +
   '</div>';
@@ -2337,6 +2452,16 @@ function openStop(i) {
     ? s.distKm + ' km por ruta real' : 'Punto de inicio';
   document.getElementById('d-dur').textContent = s.durMin ? s.durMin + ' minutos' : '—';
   document.getElementById('d-eta').textContent = s.eta || '—';
+  var dlRow = document.getElementById('d-deadline-row');
+  var dlEl = document.getElementById('d-deadline');
+  if (dlRow && dlEl) {
+    if (s.deadline) {
+      dlRow.style.display = '';
+      dlEl.textContent = 'Antes de las ' + s.deadline;
+    } else {
+      dlRow.style.display = 'none';
+    }
+  }
   document.getElementById('d-ord').textContent = s.isDepot
     ? 'Punto de salida fijo' : 'Posición ' + s.order + ' · OSRM + 2-opt';
   document.getElementById('b-ok').className = 'stb' + (s.done ? ' ok' : '');
