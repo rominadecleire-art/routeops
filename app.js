@@ -800,19 +800,19 @@ function showAudioResult(txt) {
   var txtEl = document.getElementById('audio-txt');
   if (!cleaned) { if (res) res.style.display = 'none'; return; }
   if (res) res.style.display = 'block';
-  if (txtEl) txtEl.textContent = cleaned;
+  if (txtEl) txtEl.value = cleaned;
 }
 
 function useAudioText() {
   var txt = document.getElementById('audio-txt');
-  if (!txt || !txt.textContent.trim()) return;
+  if (!txt || !txt.value.trim()) return;
   switchMethod('text');
   var mtxt = document.getElementById('mtxt');
   if (mtxt) {
-    mtxt.value = (mtxt.value ? mtxt.value + '\n' : '') + txt.textContent.trim();
+    mtxt.value = (mtxt.value ? mtxt.value + '\n' : '') + txt.value.trim();
     mtxt.focus();
   }
-  showToast('Texto agregado al panel de texto', 'ok');
+  showToast('Texto agregado — revisá y presioná Continuar', 'ok');
   clearAudio();
 }
 
@@ -915,21 +915,19 @@ async function runOptimization(txt, demoStops) {
     return;
   }
 
-  step(3, 'r', 'Consultando OSRM (' + (withCoords.length + 1) + ' puntos)...');
   var allPts = [DEPOT].concat(withCoords);
-
-  // ── DEBUG: stop coordinates ──────────────────────────────────────────────
-  console.group('RouteOps DEBUG — coordinates (matrix index | name | lat | lng)');
-  allPts.forEach(function(p, i) {
-    console.log(i + ' | ' + p.name + ' | ' + p.lat.toFixed(6) + ' | ' + p.lng.toFixed(6));
-  });
-  console.groupEnd();
+  var OSRM_CHUNK = 15;
+  var nPts = allPts.length;
+  var totalChunks = Math.ceil(nPts / OSRM_CHUNK);
+  step(3, 'r', 'Consultando OSRM (' + nPts + ' puntos' + (totalChunks > 1 ? ', ' + totalChunks + ' chunks' : '') + ')...');
 
   try {
-    var mat = await osrmMatrix(allPts);
+    var mat = await osrmMatrixChunked(allPts, OSRM_CHUNK, function(cur, total) {
+      if (total > 1) step(3, 'r', 'OSRM: ' + cur + '/' + total + ' chunks...');
+    });
     distMatrix = mat.dists;
     durMatrix  = mat.durs;
-    step(3, 'ok', 'Matriz ' + allPts.length + 'x' + allPts.length + ' calculada por calles reales');
+    step(3, 'ok', nPts + 'x' + nPts + ' matriz OSRM — distancias reales por calles');
 
     // ── DEBUG: OSRM distance matrix (meters) ────────────────────────────────
     console.group('RouteOps DEBUG — OSRM distance matrix (m) — rows=FROM, cols=TO');
@@ -943,8 +941,9 @@ async function runOptimization(txt, demoStops) {
   } catch(e) {
     step(3, 'er', 'OSRM no disponible — usando distancia geodésica');
     distMatrix = buildHavMatrix(allPts);
+    // d in meters → km → hours at 30 km/h → seconds
     durMatrix  = distMatrix.map(function(row) {
-      return row.map(function(d) { return d / 30 * 3600; });
+      return row.map(function(d) { return d / 1000 / 30 * 3600; });
     });
   }
 
@@ -1003,15 +1002,24 @@ async function runOptimization(txt, demoStops) {
     console.log('Total NN: ' + kmSeed.toFixed(3) + ' km (round-trip)');
     console.groupEnd();
 
-    step(5, 'r', 'Aplicando 2-opt + or-opt...');
-    await sleep(200);
-    var twoOptResult = twoOptMatrix(seedRoute, distMatrix);
-    var orOptResult  = orOpt1(twoOptResult.route, distMatrix);
-    optRoute = orOptResult.route;
-    kmOpt  = routeDistKm(optRoute, distMatrix);
-    minOpt = routeDurMin(optRoute, durMatrix);
-    saved  = kmSeed - kmOpt;
-    step(5, 'ok', '2-opt+or-opt: ' + kmOpt.toFixed(1) + ' km · −' + saved.toFixed(1) + ' km');
+    if (withCoords.length > 25) {
+      // NN only for large routes — 2-opt on 25+ nodes is slow on mobile
+      optRoute = seedRoute;
+      kmOpt  = kmSeed;
+      minOpt = routeDurMin(optRoute, durMatrix);
+      saved  = 0;
+      step(5, 'ok', 'NN (ruta grande): ' + kmOpt.toFixed(1) + ' km');
+    } else {
+      step(5, 'r', 'Aplicando 2-opt + or-opt...');
+      await sleep(200);
+      var twoOptResult = twoOptMatrix(seedRoute, distMatrix);
+      var orOptResult  = orOpt1(twoOptResult.route, distMatrix);
+      optRoute = orOptResult.route;
+      kmOpt  = routeDistKm(optRoute, distMatrix);
+      minOpt = routeDurMin(optRoute, durMatrix);
+      saved  = kmSeed - kmOpt;
+      step(5, 'ok', '2-opt+or-opt: ' + kmOpt.toFixed(1) + ' km · −' + saved.toFixed(1) + ' km');
+    }
   }
 
   // ── DEBUG: final optimized route ──────────────────────────────────────────
@@ -1183,6 +1191,42 @@ function osrmMatrix(pts) {
   });
 }
 
+// Split into source-chunks of chunkSize; calls onProgress(cur, total) before each chunk.
+async function osrmMatrixChunked(pts, chunkSize, onProgress) {
+  var n = pts.length;
+  var coords = pts.map(function(p) { return p.lng + ',' + p.lat; }).join(';');
+  var allDst = pts.map(function(_, i) { return i; }).join(';');
+  var dists  = pts.map(function() { return new Array(n).fill(0); });
+  var durs   = pts.map(function() { return new Array(n).fill(0); });
+  var totalChunks = Math.ceil(n / chunkSize);
+
+  for (var c = 0; c < totalChunks; c++) {
+    var start = c * chunkSize;
+    var srcArr = [];
+    for (var i = start; i < Math.min(start + chunkSize, n); i++) srcArr.push(i);
+    if (onProgress) onProgress(c + 1, totalChunks);
+
+    var url = 'https://router.project-osrm.org/table/v1/driving/' + coords +
+              '?sources=' + srcArr.join(';') + '&destinations=' + allDst +
+              '&annotations=distance,duration';
+
+    var data = await new Promise(function(resolve, reject) {
+      var t = setTimeout(function() { reject(new Error('timeout')); }, 18000);
+      fetch(url)
+        .then(function(r) { return r.json(); })
+        .then(function(d) { clearTimeout(t); resolve(d); })
+        .catch(function(e) { clearTimeout(t); reject(e); });
+    });
+
+    if (data.code !== 'Ok') throw new Error('osrm: ' + data.code);
+    srcArr.forEach(function(rowIdx, ci) {
+      dists[rowIdx] = data.distances[ci];
+      durs[rowIdx]  = data.durations[ci];
+    });
+  }
+  return {dists: dists, durs: durs};
+}
+
 function buildHavMatrix(pts) {
   return pts.map(function(a) {
     return pts.map(function(b) { return hav(a.lat, a.lng, b.lat, b.lng) * 1000; });
@@ -1349,41 +1393,68 @@ function groupByLocality(withCoords) {
   return groups;
 }
 
-// Cluster stops by geographic proximity: stops within RADIUS_KM = same city.
-// More reliable than text-based locality extraction when address format varies.
+// Group stops by city.  Strategy (in order of priority):
+//   1. Text locality extracted from address — most reliable for Argentine delivery sheets.
+//   2. Coordinate proximity (5 km radius) — fallback when text city is absent or looks like a street.
 function clusterByCity(withCoords) {
-  var RADIUS_KM = 15;
-  var clusters = []; // [{name, lat, lng, count, indices}]
+  var GEO_RADIUS_KM = 5;
+  var clusters = []; // {name, lat, lng, count, indices}
+
+  function isValidCity(s) {
+    // Reject if it looks like a street ("Rivadavia 500"), starts with digit, or too short
+    return s && s.length >= 3 && !/^\d/.test(s) && !/\d{3,}/.test(s);
+  }
+
+  function findByName(name) {
+    for (var i = 0; i < clusters.length; i++) {
+      if (clusters[i].name === name) return clusters[i];
+    }
+    return null;
+  }
+
+  function updateCentroid(c, lat, lng) {
+    if (lat && lng) {
+      c.count++;
+      c.lat = c.lat !== null ? c.lat + (lat - c.lat) / c.count : lat;
+      c.lng = c.lng !== null ? c.lng + (lng - c.lng) / c.count : lng;
+    }
+  }
 
   withCoords.forEach(function(s, i) {
     var idx = i + 1;
-    var nameFromAddr = extractLocality(s.resolvedAddress || s.address) || '';
+    // Try text locality from original address first, then resolved address
+    var textCity = extractLocality(s.address) || extractLocality(s.resolvedAddress || '') || '';
+    var useText = isValidCity(textCity);
 
-    if (!s.lat || !s.lng) {
-      var label = nameFromAddr || 'sin-ciudad';
-      var found = null;
-      clusters.forEach(function(c) { if (c.name === label) found = c; });
-      if (found) { found.indices.push(idx); }
-      else { clusters.push({name: label, lat: null, lng: null, count: 1, indices: [idx]}); }
+    if (useText) {
+      var c = findByName(textCity);
+      if (c) {
+        c.indices.push(idx);
+        updateCentroid(c, s.lat, s.lng);
+      } else {
+        clusters.push({name: textCity, lat: s.lat || null, lng: s.lng || null, count: 1, indices: [idx]});
+      }
       return;
     }
 
-    var bestC = null, bestD = Infinity;
-    clusters.forEach(function(c) {
-      if (c.lat === null) return;
-      var d = hav(s.lat, s.lng, c.lat, c.lng);
-      if (d < bestD) { bestD = d; bestC = c; }
-    });
-
-    if (bestC && bestD < RADIUS_KM) {
-      bestC.indices.push(idx);
-      bestC.count++;
-      // Incremental centroid update
-      bestC.lat = bestC.lat + (s.lat - bestC.lat) / bestC.count;
-      bestC.lng = bestC.lng + (s.lng - bestC.lng) / bestC.count;
+    // Fallback: coordinate clustering (5 km)
+    if (s.lat && s.lng) {
+      var bestC = null, bestD = Infinity;
+      clusters.forEach(function(c) {
+        if (c.lat === null) return;
+        var d = hav(s.lat, s.lng, c.lat, c.lng);
+        if (d < bestD) { bestD = d; bestC = c; }
+      });
+      if (bestC && bestD < GEO_RADIUS_KM) {
+        bestC.indices.push(idx);
+        updateCentroid(bestC, s.lat, s.lng);
+      } else {
+        clusters.push({name: textCity || ('zona-' + (clusters.length + 1)), lat: s.lat, lng: s.lng, count: 1, indices: [idx]});
+      }
     } else {
-      var label = nameFromAddr || ('ciudad-' + (clusters.length + 1));
-      clusters.push({name: label, lat: s.lat, lng: s.lng, count: 1, indices: [idx]});
+      var c = findByName('sin-ciudad');
+      if (c) { c.indices.push(idx); }
+      else { clusters.push({name: 'sin-ciudad', lat: null, lng: null, count: 1, indices: [idx]}); }
     }
   });
 

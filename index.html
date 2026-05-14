@@ -320,11 +320,11 @@
         </div>
         <!-- Resultado compartido -->
         <div class="audio-result" id="audio-result" style="display:none">
-          <div class="audio-result-lbl">Texto transcripto</div>
-          <div class="audio-result-txt" id="audio-txt"></div>
+          <div class="audio-result-lbl">Revisá y corregí el texto antes de procesar</div>
+          <textarea class="audio-result-txt" id="audio-txt" rows="6" placeholder="Texto transcripto aparecerá aquí..."></textarea>
           <div style="display:flex;gap:8px;margin-top:10px">
             <button class="bbtn bbtn-g" style="margin:0;flex:1;padding:11px;font-size:13px" onclick="useAudioText()">
-              <i class="ti ti-check"></i> Usar este texto
+              <i class="ti ti-check"></i> Confirmar y usar
             </button>
             <button class="bbtn bbtn-d" style="margin:0;padding:11px;font-size:13px" onclick="clearAudio()">
               <i class="ti ti-refresh"></i>
