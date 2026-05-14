@@ -975,40 +975,40 @@ async function runOptimization(txt, demoStops) {
   }
 
   // ── Detect multi-city ────────────────────────────────────────────────────────
-  var groupsMap = clusterByPostalCode(withCoords);
-  var groupKeys = Object.keys(groupsMap);
-  var isMultiCity = groupKeys.length > 1;
+  // Only group if stops are geographically dispersed (< 70% within 20 km of each other).
+  // Addresses without explicit city/CP (e.g. "Castelli 553", "Santa Fe 618") would otherwise
+  // create phantom groups — isSingleCity prevents that.
+  var groupsMap = {};
+  var isMultiCity = false;
+  if (!isSingleCity(withCoords)) {
+    groupsMap = clusterByPostalCode(withCoords);
+    isMultiCity = Object.keys(groupsMap).length > 1;
+  }
 
   var indices = withCoords.map(function(_, i) { return i + 1; });
   var seedRoute, optRoute, kmOpt, minOpt, kmSeed, saved, routeGroups;
 
   if (isMultiCity) {
     // ── Multi-city path ───────────────────────────────────────────────────────
-    step(4, 'r', 'Agrupando ' + groupKeys.length + ' localidades...');
+    var groupKeys = Object.keys(groupsMap);
+    step(4, 'r', 'Agrupando ' + groupKeys.length + ' zonas...');
     await sleep(200);
-
-    console.group('RouteOps DEBUG — multi-city groups');
-    groupKeys.forEach(function(k) {
-      var g = groupsMap[k];
-      console.log(k + ' (' + g.indices.length + ' paradas): indices [' + g.indices.join(', ') + ']');
-    });
-    console.groupEnd();
 
     seedRoute = nnFromMatrix(0, indices, distMatrix);
     kmSeed = routeDistKm(seedRoute, distMatrix);
-    step(4, 'ok', groupKeys.length + ' localidades: ' + groupKeys.map(function(k) {
+    step(4, 'ok', groupKeys.length + ' zonas: ' + groupKeys.map(function(k) {
       return k + ' (' + groupsMap[k].indices.length + ')';
     }).join(' · '));
 
-    step(5, 'r', 'Optimizando cada localidad por separado...');
+    step(5, 'r', 'Optimizando cada zona por separado...');
     await sleep(200);
-    var grpResult = optimizeGroups(withCoords, distMatrix);
-    optRoute     = grpResult.route;
-    routeGroups  = grpResult.groups;
+    var grpResult = optimizeGroups(groupsMap, withCoords, distMatrix);
+    optRoute    = grpResult.route;
+    routeGroups = grpResult.groups;
     kmOpt  = routeDistKm(optRoute, distMatrix);
     minOpt = routeDurMin(optRoute, durMatrix);
     saved  = kmSeed - kmOpt;
-    step(5, 'ok', 'Multi-ciudad NN+2-opt: ' + kmOpt.toFixed(1) + ' km · −' + saved.toFixed(1) + ' km');
+    step(5, 'ok', 'Multi-zona NN+2-opt: ' + kmOpt.toFixed(1) + ' km · −' + saved.toFixed(1) + ' km');
 
   } else {
     // ── Single-city path (original) ───────────────────────────────────────────
@@ -1430,6 +1430,25 @@ function groupByLocality(withCoords) {
   return groups;
 }
 
+// Returns true when ≥70% of stops cluster within 20 km of the densest point.
+// When true, all stops should be treated as a single city — no grouping.
+function isSingleCity(withCoords) {
+  if (withCoords.length < 2) return true;
+  var RADIUS_KM = 20;
+  var THRESHOLD = 0.70;
+  var n = withCoords.length;
+  var best = 0;
+  for (var a = 0; a < n; a++) {
+    var count = 0;
+    for (var b = 0; b < n; b++) {
+      if (hav(withCoords[a].lat, withCoords[a].lng,
+              withCoords[b].lat, withCoords[b].lng) <= RADIUS_KM) count++;
+    }
+    if (count > best) best = count;
+  }
+  return best / n >= THRESHOLD;
+}
+
 // Group stops by postal code (primary) → city name (fallback) → geo proximity (last resort).
 // Returns groupsMap: {label: {name: label, indices: [1-based]}}
 function clusterByPostalCode(withCoords) {
@@ -1541,8 +1560,7 @@ function orderGroupsByProximity(groupsMap, withCoords) {
   return ordered;
 }
 
-function optimizeGroups(withCoords, distMatrix) {
-  var groupsMap = clusterByPostalCode(withCoords);
+function optimizeGroups(groupsMap, withCoords, distMatrix) {
   if (Object.keys(groupsMap).length <= 1) return null;
 
   var ordered = orderGroupsByProximity(groupsMap, withCoords);
