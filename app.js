@@ -177,6 +177,8 @@ function startWizard() {
   manualQueue = [];
   pendingPDF = null;
   audioTranscript = '';
+  audioConfirmedLines = 0;
+  updateAudioCounter();
 
   // Reset UI fields
   var els = {
@@ -531,8 +533,9 @@ async function callClaudeImages(files) {
 
 function goStep3() {
   var txt = '';
-  if (currentMethod === 'text') {
-    txt = document.getElementById('mtxt').value.trim();
+  if (currentMethod === 'text' || currentMethod === 'audio') {
+    var el = document.getElementById('mtxt');
+    txt = el ? el.value.trim() : '';
   }
   if (!txt && !manualQueue.length && !pendingPDF && !pendingImages.length) {
     showToast('Agregá al menos una parada, subí un PDF o una foto', 'info');
@@ -569,6 +572,7 @@ var recognition = null;
 var isRecording = false;
 var audioTranscript = '';
 var processedResultsCount = 0;
+var audioConfirmedLines = 0;
 
 var mediaRecorder = null;
 var recChunks = [];
@@ -794,6 +798,18 @@ function cleanTranscript(txt) {
   return result.join('\n');
 }
 
+function updateAudioCounter() {
+  var wrap = document.getElementById('audio-counter');
+  var badge = document.getElementById('audio-counter-txt');
+  if (!wrap || !badge) return;
+  if (audioConfirmedLines > 0) {
+    wrap.style.display = 'block';
+    badge.textContent = audioConfirmedLines + (audioConfirmedLines === 1 ? ' dirección lista' : ' direcciones listas') + ' — seguí grabando o presioná Continuar';
+  } else {
+    wrap.style.display = 'none';
+  }
+}
+
 function showAudioResult(txt) {
   var cleaned = cleanTranscript(txt);
   var res = document.getElementById('audio-result');
@@ -804,22 +820,33 @@ function showAudioResult(txt) {
 }
 
 function useAudioText() {
-  var txt = document.getElementById('audio-txt');
-  if (!txt || !txt.value.trim()) return;
-  switchMethod('text');
+  var txtEl = document.getElementById('audio-txt');
+  if (!txtEl || !txtEl.value.trim()) return;
+  var raw = txtEl.value.trim();
+  var lines = raw.split('\n').filter(function(l) { return l.trim().length > 2; });
+
+  // Accumulate into the shared text buffer (mtxt) — stays hidden
   var mtxt = document.getElementById('mtxt');
-  if (mtxt) {
-    mtxt.value = (mtxt.value ? mtxt.value + '\n' : '') + txt.value.trim();
-    mtxt.focus();
-  }
-  showToast('Texto agregado — revisá y presioná Continuar', 'ok');
-  clearAudio();
+  if (mtxt) mtxt.value = (mtxt.value ? mtxt.value + '\n' : '') + raw;
+
+  // Update counter and stay in audio panel
+  audioConfirmedLines += lines.length;
+  updateAudioCounter();
+  showToast(lines.length + (lines.length === 1 ? ' dirección agregada' : ' direcciones agregadas'), 'ok');
+
+  // Clear current transcript, keep audio panel open
+  txtEl.value = '';
+  var res = document.getElementById('audio-result');
+  if (res) res.style.display = 'none';
+  audioTranscript = '';
 }
 
 function clearAudio() {
   audioTranscript = '';
   var res = document.getElementById('audio-result');
   if (res) res.style.display = 'none';
+  var txtEl = document.getElementById('audio-txt');
+  if (txtEl) txtEl.value = '';
   var interim = document.getElementById('mic-interim');
   if (interim) interim.textContent = '';
 }
