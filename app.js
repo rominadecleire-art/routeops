@@ -545,8 +545,27 @@ function goStep3() {
     showToast('Agregá al menos una parada, subí un PDF o una foto', 'info');
     return;
   }
+  // City is mandatory for PDF and image uploads
+  if (pendingPDF || pendingImages.length) {
+    var ecInp = document.getElementById('extract-city-inp');
+    var ec = ecInp ? ecInp.value.trim() : '';
+    if (!ec) {
+      showToast('Escribí la ciudad de las entregas antes de continuar', 'err');
+      if (ecInp) {
+        ecInp.style.borderColor = '#ef4444';
+        ecInp.focus();
+        ecInp.scrollIntoView({behavior: 'smooth', block: 'center'});
+      }
+      return;
+    }
+  }
   showWS(3);
   runOptimization(txt, null);
+}
+
+function clearCityError() {
+  var inp = document.getElementById('extract-city-inp');
+  if (inp) inp.style.borderColor = '#1e3a5f';
 }
 
 function runDemo() {
@@ -917,24 +936,24 @@ async function runOptimization(txt, demoStops) {
     step(1, 'ok', 'Usando paradas manuales');
   }
 
-  stops = stops.concat(manualQueue);
-  if (!stops.length) {
-    showToast('Sin paradas para procesar', 'err');
-    return;
-  }
-
-  // Apply city context: append city to addresses that lack one (no comma present)
+  // Apply city to ALL extracted addresses (before merging manual queue)
   var ecInp = document.getElementById('extract-city-inp');
   var ec = ecInp ? ecInp.value.trim() : '';
-  if (ec) {
+  if (ec && stops.length) {
     stops = stops.map(function(s) {
       if (!s.address) return s;
       var addr = s.address.trim();
-      if (addr.indexOf(',') === -1 && addr.toLowerCase().indexOf(ec.toLowerCase()) === -1) {
+      if (addr.toLowerCase().indexOf(ec.toLowerCase()) === -1) {
         addr = addr + ', ' + ec;
       }
       return Object.assign({}, s, {address: addr});
     });
+  }
+
+  stops = stops.concat(manualQueue);
+  if (!stops.length) {
+    showToast('Sin paradas para procesar', 'err');
+    return;
   }
 
   step(2, 'r', 'Geocodificando ' + stops.length + ' paradas...');

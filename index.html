@@ -353,17 +353,23 @@
         </div>
       </div>
 
-      <!-- CIUDAD PARA PDF/IMAGEN -->
-      <div id="extract-city-wrap" style="display:none;margin-top:8px">
-        <div style="background:#0c1c2e;border:1px solid #1e3a5f;border-radius:13px;padding:11px 14px;display:flex;align-items:center;gap:10px">
-          <i class="ti ti-map-pin-2" style="color:#60a5fa;font-size:17px;flex-shrink:0"></i>
-          <div style="flex:1;min-width:0">
-            <div style="font-size:10px;color:#475569;margin-bottom:3px;font-weight:700;letter-spacing:.06em;text-transform:uppercase">Ciudad de las direcciones</div>
-            <input id="extract-city-inp" type="text" placeholder="Ej: Venado Tuerto"
-              style="width:100%;background:transparent;border:none;outline:none;font-size:13px;color:#e2e8f0;font-family:'DM Sans',sans-serif;padding:0">
+      <!-- CIUDAD PARA PDF/IMAGEN (obligatorio) -->
+      <div id="extract-city-wrap" style="display:none;margin-top:10px">
+        <div style="background:#0c1c2e;border:1.5px solid #1e3a5f;border-radius:13px;padding:13px 14px" id="extract-city-card">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:9px">
+            <i class="ti ti-map-pin-2" style="color:#60a5fa;font-size:15px"></i>
+            <span style="font-size:11px;color:#60a5fa;font-weight:700;letter-spacing:.05em;text-transform:uppercase">Ciudad de las entregas</span>
+            <span style="font-size:13px;color:#ef4444;font-weight:700;margin-left:1px">*</span>
+          </div>
+          <input id="extract-city-inp" type="text"
+            placeholder="Ej: Venado Tuerto, Santa Fe"
+            oninput="clearCityError()"
+            style="width:100%;background:#162842;border:1.5px solid #1e3a5f;border-radius:9px;padding:10px 12px;font-size:13px;color:#e2e8f0;font-family:'DM Sans',sans-serif;outline:none;box-sizing:border-box;transition:border-color .15s">
+          <div style="font-size:11px;color:#475569;margin-top:7px">
+            Se agrega al final de cada dirección del archivo para que el geocodificador la encuentre correctamente.<br>
+            <span style="color:#374151">Ej: &ldquo;Aguero 607&rdquo; + <strong style="color:#94a3b8">Venado Tuerto, Santa Fe</strong> &rarr; <em>Aguero 607, Venado Tuerto, Santa Fe</em></span>
           </div>
         </div>
-        <div style="color:#475569;font-size:11px;margin-top:4px;padding-left:2px">Opcional &middot; Se agrega a direcciones sin ciudad para geocodificar correctamente</div>
       </div>
 
       <!-- AGREGAR INDIVIDUAL (siempre visible) -->
