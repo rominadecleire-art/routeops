@@ -265,6 +265,21 @@
           <span id="pdf-name">PDF listo</span>
           <button onclick="clearPDF()" style="margin-left:auto;background:none;border:none;color:#60a5fa;cursor:pointer;font-size:12px">✕ Quitar</button>
         </div>
+        <div style="margin-top:10px;background:#0c1c2e;border:1.5px solid #1e3a5f;border-radius:13px;padding:13px 14px">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:9px">
+            <i class="ti ti-map-pin-2" style="color:#60a5fa;font-size:15px"></i>
+            <span style="font-size:11px;color:#60a5fa;font-weight:700;letter-spacing:.05em;text-transform:uppercase">Ciudad de las entregas</span>
+            <span style="font-size:14px;color:#ef4444;font-weight:700;line-height:1"> *</span>
+          </div>
+          <input id="extract-city-inp" type="text"
+            placeholder="Ej: Venado Tuerto, Santa Fe"
+            oninput="clearCityError()"
+            style="width:100%;background:#162842;border:1.5px solid #1e3a5f;border-radius:9px;padding:10px 12px;font-size:13px;color:#e2e8f0;font-family:'DM Sans',sans-serif;outline:none;box-sizing:border-box;transition:border-color .15s">
+          <div style="font-size:11px;color:#64748b;margin-top:7px;line-height:1.5">
+            Obligatorio · Se agrega a <strong style="color:#94a3b8">todas</strong> las direcciones del PDF.<br>
+            Ej: &ldquo;Aguero 607&rdquo; &rarr; <em style="color:#94a3b8">Aguero 607, Venado Tuerto, Santa Fe</em>
+          </div>
+        </div>
       </div>
 
       <!-- PANEL IMAGEN -->
@@ -285,6 +300,21 @@
         </div>
         <div id="img-list"></div>
         <div class="dz-pill" style="margin-top:6px"><i class="ti ti-eye" style="font-size:11px"></i> Claude Vision · requiere ANTHROPIC_API_KEY</div>
+        <div style="margin-top:10px;background:#0c1c2e;border:1.5px solid #1e3a5f;border-radius:13px;padding:13px 14px">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:9px">
+            <i class="ti ti-map-pin-2" style="color:#60a5fa;font-size:15px"></i>
+            <span style="font-size:11px;color:#60a5fa;font-weight:700;letter-spacing:.05em;text-transform:uppercase">Ciudad de las entregas</span>
+            <span style="font-size:14px;color:#ef4444;font-weight:700;line-height:1"> *</span>
+          </div>
+          <input id="extract-city-inp-img" type="text"
+            placeholder="Ej: Venado Tuerto, Santa Fe"
+            oninput="clearCityError()"
+            style="width:100%;background:#162842;border:1.5px solid #1e3a5f;border-radius:9px;padding:10px 12px;font-size:13px;color:#e2e8f0;font-family:'DM Sans',sans-serif;outline:none;box-sizing:border-box;transition:border-color .15s">
+          <div style="font-size:11px;color:#64748b;margin-top:7px;line-height:1.5">
+            Obligatorio · Se agrega a <strong style="color:#94a3b8">todas</strong> las direcciones de las fotos.<br>
+            Ej: &ldquo;Aguero 607&rdquo; &rarr; <em style="color:#94a3b8">Aguero 607, Venado Tuerto, Santa Fe</em>
+          </div>
+        </div>
       </div>
 
       <!-- PANEL AUDIO -->
@@ -350,25 +380,6 @@
       <div id="mpanel-text" style="display:none">
         <div class="mbox">
           <textarea id="mtxt" placeholder="Escribí o pegá las direcciones, una por línea:&#10;&#10;Rivadavia 567, Venado Tuerto&#10;Belgrano 900, Venado Tuerto&#10;Corrientes 1234, Rosario..."></textarea>
-        </div>
-      </div>
-
-      <!-- CIUDAD PARA PDF/IMAGEN (obligatorio) -->
-      <div id="extract-city-wrap" style="display:none;margin-top:10px">
-        <div style="background:#0c1c2e;border:1.5px solid #1e3a5f;border-radius:13px;padding:13px 14px" id="extract-city-card">
-          <div style="display:flex;align-items:center;gap:6px;margin-bottom:9px">
-            <i class="ti ti-map-pin-2" style="color:#60a5fa;font-size:15px"></i>
-            <span style="font-size:11px;color:#60a5fa;font-weight:700;letter-spacing:.05em;text-transform:uppercase">Ciudad de las entregas</span>
-            <span style="font-size:13px;color:#ef4444;font-weight:700;margin-left:1px">*</span>
-          </div>
-          <input id="extract-city-inp" type="text"
-            placeholder="Ej: Venado Tuerto, Santa Fe"
-            oninput="clearCityError()"
-            style="width:100%;background:#162842;border:1.5px solid #1e3a5f;border-radius:9px;padding:10px 12px;font-size:13px;color:#e2e8f0;font-family:'DM Sans',sans-serif;outline:none;box-sizing:border-box;transition:border-color .15s">
-          <div style="font-size:11px;color:#475569;margin-top:7px">
-            Se agrega al final de cada dirección del archivo para que el geocodificador la encuentre correctamente.<br>
-            <span style="color:#374151">Ej: &ldquo;Aguero 607&rdquo; + <strong style="color:#94a3b8">Venado Tuerto, Santa Fe</strong> &rarr; <em>Aguero 607, Venado Tuerto, Santa Fe</em></span>
-          </div>
         </div>
       </div>
 

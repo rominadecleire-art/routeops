@@ -202,8 +202,10 @@ function startWizard() {
   ['fi-cam','fi-gal'].forEach(function(id) { var el=document.getElementById(id); if(el) el.value=''; });
   renderImageList();
   extractCity = '';
-  var ecInp = document.getElementById('extract-city-inp');
-  if (ecInp) ecInp.value = '';
+  ['extract-city-inp', 'extract-city-inp-img'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) { el.value = ''; el.style.borderColor = '#1e3a5f'; }
+  });
   var depOk = document.getElementById('dep-ok');
   if (depOk) depOk.classList.remove('on');
   var audioRes = document.getElementById('audio-result');
@@ -547,7 +549,8 @@ function goStep3() {
   }
   // City is mandatory for PDF and image uploads
   if (pendingPDF || pendingImages.length) {
-    var ecInp = document.getElementById('extract-city-inp');
+    var ecId = pendingImages.length ? 'extract-city-inp-img' : 'extract-city-inp';
+    var ecInp = document.getElementById(ecId);
     var ec = ecInp ? ecInp.value.trim() : '';
     if (!ec) {
       showToast('Escribí la ciudad de las entregas antes de continuar', 'err');
@@ -564,8 +567,10 @@ function goStep3() {
 }
 
 function clearCityError() {
-  var inp = document.getElementById('extract-city-inp');
-  if (inp) inp.style.borderColor = '#1e3a5f';
+  ['extract-city-inp', 'extract-city-inp-img'].forEach(function(id) {
+    var inp = document.getElementById(id);
+    if (inp) inp.style.borderColor = '#1e3a5f';
+  });
 }
 
 function runDemo() {
@@ -585,8 +590,6 @@ function switchMethod(m) {
     if (tab) tab.classList.toggle('act', x === m);
     if (panel) panel.style.display = x === m ? 'block' : 'none';
   });
-  var ecWrap = document.getElementById('extract-city-wrap');
-  if (ecWrap) ecWrap.style.display = (m === 'pdf' || m === 'image') ? 'block' : 'none';
   if (m === 'audio') initAudio();
 }
 
@@ -937,7 +940,9 @@ async function runOptimization(txt, demoStops) {
   }
 
   // Apply city to ALL extracted addresses (before merging manual queue)
-  var ecInp = document.getElementById('extract-city-inp');
+  var ecInp = pendingImages.length
+    ? document.getElementById('extract-city-inp-img')
+    : document.getElementById('extract-city-inp');
   var ec = ecInp ? ecInp.value.trim() : '';
   if (ec && stops.length) {
     stops = stops.map(function(s) {
