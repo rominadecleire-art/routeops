@@ -242,6 +242,23 @@ function showWS(n) {
   document.getElementById('ws3').style.display = n === 3 ? 'block' : 'none';
 }
 
+function wizardBack() {
+  var ws3 = document.getElementById('ws3');
+  var ws2 = document.getElementById('ws2');
+  if (ws3 && ws3.style.display !== 'none') {
+    var wsVal = document.getElementById('ws-val');
+    if (wsVal && wsVal.style.display !== 'none') {
+      cancelValidation();
+    } else {
+      showWS(2);
+    }
+  } else if (ws2 && ws2.style.display !== 'none') {
+    showWS(1);
+  } else {
+    history.back();
+  }
+}
+
 // ════════════════════════════════════════
 // STEP 1: Punto de partida
 // ════════════════════════════════════════
@@ -1494,12 +1511,13 @@ var AR_PROVINCES = /^(buenos aires|santa fe|c[oó]rdoba|mendoza|tucum[aá]n|salt
 
 // Returns the 4-digit Argentine postal code from addr, or '' if not found.
 // Skips the first comma-segment (street + house number) to avoid matching house numbers.
+// Handles both standalone "2627" and "CP2627" / "CP 2627" formats.
 function extractPostalCode(addr) {
   if (!addr) return '';
   var commaIdx = addr.indexOf(',');
   var searchIn = commaIdx >= 0 ? addr.slice(commaIdx + 1) : addr;
-  var m = searchIn.match(/\b(\d{4})\b/);
-  return m ? m[1] : '';
+  var m = searchIn.match(/\bCP\s*(\d{4})\b|\b(\d{4})\b/i);
+  return m ? (m[1] || m[2]) : '';
 }
 
 function extractLocality(addr) {
@@ -1526,12 +1544,11 @@ function groupByLocality(withCoords) {
   return groups;
 }
 
-// Returns true when ≥70% of stops cluster within 20 km of the densest point.
+// Returns true when ALL stops are within 20 km of the densest point.
 // When true, all stops should be treated as a single city — no grouping.
 function isSingleCity(withCoords) {
   if (withCoords.length < 2) return true;
   var RADIUS_KM = 20;
-  var THRESHOLD = 0.70;
   var n = withCoords.length;
   var best = 0;
   for (var a = 0; a < n; a++) {
@@ -1542,7 +1559,7 @@ function isSingleCity(withCoords) {
     }
     if (count > best) best = count;
   }
-  return best / n >= THRESHOLD;
+  return best >= n;
 }
 
 // Group stops by postal code (primary) → city name (fallback) → geo proximity (last resort).
@@ -1660,15 +1677,40 @@ function optimizeGroups(groupsMap, withCoords, distMatrix) {
   if (Object.keys(groupsMap).length <= 1) return null;
 
   var ordered = orderGroupsByProximity(groupsMap, withCoords);
+
+  // Groups with deadline stops go first
+  ordered.sort(function(a, b) {
+    var aHas = a.indices.some(function(idx) { return !!withCoords[idx - 1].deadline; });
+    var bHas = b.indices.some(function(idx) { return !!withCoords[idx - 1].deadline; });
+    return (aHas ? 0 : 1) - (bHas ? 0 : 1);
+  });
+
   var optRoute = [], fromIdx = 0;
   var routeGroups = [];
 
   ordered.forEach(function(group) {
-    var gr = nnFromMatrix(fromIdx, group.indices.slice(), distMatrix);
-    gr = twoOptMatrix(gr, distMatrix, fromIdx).route;
+    var prio = group.indices.filter(function(idx) { return !!withCoords[idx - 1].deadline; });
+    var norm = group.indices.filter(function(idx) { return !withCoords[idx - 1].deadline; });
+    prio.sort(function(a, b) {
+      return (withCoords[a - 1].deadline || '').localeCompare(withCoords[b - 1].deadline || '');
+    });
+
+    var gr = [];
+    if (prio.length) {
+      var pr = prio.length === 1 ? prio.slice() : nnFromMatrix(fromIdx, prio.slice(), distMatrix);
+      if (prio.length > 1 && prio.length <= 25) pr = twoOptMatrix(pr, distMatrix, fromIdx).route;
+      gr = gr.concat(pr);
+      fromIdx = pr[pr.length - 1];
+    }
+    if (norm.length) {
+      var nr = norm.length === 1 ? norm.slice() : nnFromMatrix(fromIdx, norm.slice(), distMatrix);
+      if (norm.length > 1 && norm.length <= 25) nr = twoOptMatrix(nr, distMatrix, fromIdx).route;
+      gr = gr.concat(nr);
+      fromIdx = nr[nr.length - 1];
+    }
+
     routeGroups.push({name: group.name, indices: gr});
     optRoute = optRoute.concat(gr);
-    fromIdx = gr[gr.length - 1];
   });
 
   return {route: optRoute, groups: routeGroups};

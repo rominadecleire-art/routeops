@@ -63,7 +63,7 @@
   <!-- ══ STOPS ══ -->
   <div class="screen" id="scr-stops">
     <div class="hdr">
-      <button class="back" onclick="go('scr-home')"><i class="ti ti-arrow-left"></i></button>
+      <button class="back" onclick="history.back()"><i class="ti ti-arrow-left"></i></button>
       <div><div class="hdr-t" id="st-title">Paradas</div><div class="hdr-s" id="st-sub">—</div></div>
     </div>
     <div class="scrl"><div id="sl"></div></div>
@@ -78,7 +78,7 @@
   <!-- ══ MAP ══ -->
   <div class="screen" id="scr-map">
     <div class="hdr">
-      <button class="back" onclick="go('scr-home')"><i class="ti ti-arrow-left"></i></button>
+      <button class="back" onclick="history.back()"><i class="ti ti-arrow-left"></i></button>
       <div><div class="hdr-t">Mapa de ruta</div><div class="hdr-s" id="map-sub">—</div></div>
       <button class="back" style="margin-left:auto;background:#162842" onclick="fitRoute()">
         <i class="ti ti-zoom-fit-page" style="color:#60a5fa"></i>
@@ -110,7 +110,7 @@
   <!-- ══ DETAIL ══ -->
   <div class="screen" id="scr-detail">
     <div class="hdr">
-      <button class="back" onclick="go('scr-stops')"><i class="ti ti-arrow-left"></i></button>
+      <button class="back" onclick="history.back()"><i class="ti ti-arrow-left"></i></button>
       <div><div class="hdr-t" id="d-name">—</div><div class="hdr-s" id="d-num">—</div></div>
     </div>
     <div class="det-scrl">
@@ -138,7 +138,7 @@
   <!-- ══ WIZARD ══ -->
   <div class="screen" id="scr-wizard">
     <div class="hdr">
-      <button class="back" onclick="go('scr-home')"><i class="ti ti-arrow-left"></i></button>
+      <button class="back" onclick="wizardBack()"><i class="ti ti-arrow-left"></i></button>
       <div class="hdr-t" id="wiz-hdr">Nueva ruta</div>
     </div>
 
@@ -485,7 +485,7 @@
   <!-- ══ SETTINGS ══ -->
   <div class="screen" id="scr-settings">
     <div class="hdr">
-      <button class="back" onclick="go('scr-home')"><i class="ti ti-arrow-left"></i></button>
+      <button class="back" onclick="history.back()"><i class="ti ti-arrow-left"></i></button>
       <div><div class="hdr-t">Configuración</div></div>
     </div>
     <div class="scrl">
