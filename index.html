@@ -16,7 +16,7 @@
   </div>
   <div class="toast tok" id="toast"><i class="ti ti-check" id="t-ico"></i><span id="t-msg"></span></div>
 
-  <!-- ══ HOME ══ -->
+  <!-- HOME -->
   <div class="screen active" id="scr-home">
     <div class="home-hdr">
       <div>
@@ -60,7 +60,7 @@
     </div>
   </div>
 
-  <!-- ══ STOPS ══ -->
+  <!-- STOPS -->
   <div class="screen" id="scr-stops">
     <div class="hdr">
       <button class="back" onclick="history.back()"><i class="ti ti-arrow-left"></i></button>
@@ -75,7 +75,7 @@
     </div>
   </div>
 
-  <!-- ══ MAP ══ -->
+  <!-- MAP -->
   <div class="screen" id="scr-map">
     <div class="hdr">
       <button class="back" onclick="history.back()"><i class="ti ti-arrow-left"></i></button>
@@ -107,7 +107,7 @@
     </div>
   </div>
 
-  <!-- ══ DETAIL ══ -->
+  <!-- DETAIL -->
   <div class="screen" id="scr-detail">
     <div class="hdr">
       <button class="back" onclick="history.back()"><i class="ti ti-arrow-left"></i></button>
@@ -135,14 +135,14 @@
     </div>
   </div>
 
-  <!-- ══ WIZARD ══ -->
+  <!-- WIZARD -->
   <div class="screen" id="scr-wizard">
     <div class="hdr">
       <button class="back" onclick="wizardBack()"><i class="ti ti-arrow-left"></i></button>
       <div class="hdr-t" id="wiz-hdr">Nueva ruta</div>
     </div>
 
-    <!-- STEP 1: Punto de partida -->
+    <!-- STEP 1 -->
     <div class="wiz" id="ws1">
       <div class="wdots">
         <div class="wdot act" id="dot1"></div>
@@ -157,36 +157,25 @@
         <div class="po-opt sel" id="opt-saved" onclick="selPart('saved')">
           <div class="po-radio on" id="r-saved"></div>
           <i class="ti ti-building-warehouse po-ico" style="color:#f59e0b"></i>
-          <div>
-            <div class="po-name">Punto guardado</div>
-            <div class="po-desc">Mis favoritos guardados</div>
-          </div>
+          <div><div class="po-name">Punto guardado</div><div class="po-desc">Mis favoritos guardados</div></div>
         </div>
         <div class="po-opt" id="opt-manual" onclick="selPart('manual')">
           <div class="po-radio" id="r-manual"></div>
           <i class="ti ti-map-pin po-ico" style="color:#60a5fa"></i>
-          <div>
-            <div class="po-name">Escribir dirección</div>
-            <div class="po-desc">Cualquier ciudad o provincia</div>
-          </div>
+          <div><div class="po-name">Escribir dirección</div><div class="po-desc">Cualquier ciudad o provincia</div></div>
         </div>
         <div class="po-opt" id="opt-gps" onclick="selPart('gps')">
           <div class="po-radio" id="r-gps"></div>
           <i class="ti ti-current-location po-ico" style="color:#34d399"></i>
-          <div>
-            <div class="po-name">Mi ubicación GPS</div>
-            <div class="po-desc">Usa la posición del teléfono</div>
-          </div>
+          <div><div class="po-name">Mi ubicación GPS</div><div class="po-desc">Usa la posición del teléfono</div></div>
         </div>
       </div>
 
-      <!-- Panel Saved -->
       <div id="pan-saved">
         <div class="sec" style="margin-top:0">Puntos habituales</div>
         <div class="chips" id="saved-chips"></div>
       </div>
 
-      <!-- Panel Manual -->
       <div id="pan-manual" style="display:none">
         <div class="field">
           <div class="field-lbl">Dirección de salida</div>
@@ -205,7 +194,6 @@
         </div>
       </div>
 
-      <!-- Panel GPS -->
       <div id="pan-gps" style="display:none">
         <button class="loc-btn" onclick="getGPS()">
           <i class="ti ti-current-location"></i> Detectar mi ubicación GPS
@@ -213,7 +201,6 @@
         <div id="gps-txt" style="font-size:12px;color:#555;text-align:center;min-height:16px"></div>
       </div>
 
-      <!-- Confirmed -->
       <div class="cbox" id="dep-ok">
         <div class="cbox-lbl">✓ Punto de partida confirmado</div>
         <div class="cbox-name" id="dep-ok-name">—</div>
@@ -238,7 +225,7 @@
       </button>
     </div>
 
-    <!-- STEP 2: Cargar paradas -->
+    <!-- STEP 2 -->
     <div class="wiz" id="ws2" style="display:none">
       <div class="wdots">
         <div class="wdot"></div>
@@ -277,6 +264,20 @@
           <span id="pdf-name">PDF listo</span>
           <button onclick="clearPDF()" style="margin-left:auto;background:none;border:none;color:#60a5fa;cursor:pointer;font-size:12px">✕ Quitar</button>
         </div>
+        <!-- CIUDAD OBLIGATORIA PDF -->
+        <div style="margin-top:12px;background:#1a1500;border:2px solid #f59e0b;border-radius:13px;padding:13px 14px">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:9px">
+            <i class="ti ti-map-pin-2" style="color:#f59e0b;font-size:15px"></i>
+            <span style="font-size:11px;color:#f59e0b;font-weight:700;letter-spacing:.05em;text-transform:uppercase">Ciudad de las entregas *</span>
+          </div>
+          <input id="extract-city-inp" type="text"
+            placeholder="Ej: Venado Tuerto, Santa Fe"
+            oninput="clearCityError()"
+            style="width:100%;background:#111;border:1.5px solid #f59e0b;border-radius:9px;padding:10px 12px;font-size:13px;color:#f0f0f0;font-family:'DM Sans',sans-serif;outline:none;box-sizing:border-box">
+          <div style="font-size:11px;color:#9a7a30;margin-top:7px">
+            Obligatorio · Se agrega a todas las direcciones del PDF antes de geocodificar.
+          </div>
+        </div>
       </div>
 
       <!-- PANEL IMAGEN -->
@@ -297,11 +298,24 @@
         </div>
         <div id="img-list"></div>
         <div class="dz-pill" style="margin-top:6px"><i class="ti ti-eye" style="font-size:11px"></i> Claude Vision · requiere ANTHROPIC_API_KEY</div>
+        <!-- CIUDAD OBLIGATORIA FOTO -->
+        <div style="margin-top:12px;background:#1a1500;border:2px solid #f59e0b;border-radius:13px;padding:13px 14px">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:9px">
+            <i class="ti ti-map-pin-2" style="color:#f59e0b;font-size:15px"></i>
+            <span style="font-size:11px;color:#f59e0b;font-weight:700;letter-spacing:.05em;text-transform:uppercase">Ciudad de las entregas *</span>
+          </div>
+          <input id="extract-city-inp-img" type="text"
+            placeholder="Ej: Venado Tuerto, Santa Fe"
+            oninput="clearCityError()"
+            style="width:100%;background:#111;border:1.5px solid #f59e0b;border-radius:9px;padding:10px 12px;font-size:13px;color:#f0f0f0;font-family:'DM Sans',sans-serif;outline:none;box-sizing:border-box">
+          <div style="font-size:11px;color:#9a7a30;margin-top:7px">
+            Obligatorio · Se agrega a todas las direcciones de las fotos antes de geocodificar.
+          </div>
+        </div>
       </div>
 
       <!-- PANEL AUDIO -->
       <div id="mpanel-audio" style="display:none">
-        <!-- Web Speech (Chrome / Android) -->
         <div id="ws-audio">
           <div class="audio-card">
             <div class="audio-hint">
@@ -316,7 +330,6 @@
             <div class="mic-interim" id="mic-interim"></div>
           </div>
         </div>
-        <!-- MediaRecorder fallback (iOS Safari / Firefox) -->
         <div id="ios-recorder" style="display:none">
           <div class="audio-card">
             <div class="audio-hint">
@@ -331,11 +344,9 @@
             <div class="mic-interim" id="rec-status"></div>
           </div>
         </div>
-        <!-- Contador de direcciones confirmadas -->
         <div id="audio-counter" style="display:none;margin:10px 0 4px">
           <div class="audio-counter-pill"><i class="ti ti-list-check"></i> <span id="audio-counter-txt"></span></div>
         </div>
-        <!-- Resultado compartido -->
         <div class="audio-result" id="audio-result" style="display:none">
           <div class="audio-result-lbl">Revisá y corregí el texto antes de procesar</div>
           <textarea class="audio-result-txt" id="audio-txt" rows="6" placeholder="Texto transcripto aparecerá aquí..."></textarea>
@@ -348,7 +359,6 @@
             </button>
           </div>
         </div>
-        <!-- Sin soporte -->
         <div class="audio-no-support" id="audio-no-support" style="display:none">
           <i class="ti ti-alert-triangle" style="font-size:20px;color:#f59e0b"></i>
           <div style="font-size:12px;color:#9ca3af">
@@ -365,7 +375,7 @@
         </div>
       </div>
 
-      <!-- AGREGAR INDIVIDUAL (siempre visible) -->
+      <!-- AGREGAR INDIVIDUAL -->
       <div class="sep-line"></div>
       <div class="sec" style="margin-top:0">Agregar parada individual</div>
       <div class="add-row">
@@ -381,27 +391,7 @@
         <span><strong>Distancias reales por calles</strong> — OSRM calcula km y minutos reales, no en línea recta.</span>
       </div>
 
-      <!-- Ciudad de las entregas (PDF / Foto) — se muestra/oculta según switchMethod -->
-      <div id="city-extract-wrap" style="margin-top:12px;background:#0c1c2e;border:1.5px solid #1e3a5f;border-radius:13px;padding:13px 14px">
-        <div style="display:flex;align-items:center;gap:6px;margin-bottom:9px">
-          <i class="ti ti-map-pin-2" style="color:#60a5fa;font-size:15px"></i>
-          <span style="font-size:11px;color:#60a5fa;font-weight:700;letter-spacing:.05em;text-transform:uppercase">Ciudad de las entregas</span>
-          <span style="font-size:14px;color:#ef4444;font-weight:700;line-height:1"> *</span>
-        </div>
-        <input id="extract-city-inp" type="text"
-          placeholder="Ej: Venado Tuerto, Santa Fe"
-          oninput="clearCityError()"
-          style="width:100%;background:#162842;border:1.5px solid #1e3a5f;border-radius:9px;padding:10px 12px;font-size:13px;color:#e2e8f0;font-family:'DM Sans',sans-serif;outline:none;box-sizing:border-box;transition:border-color .15s">
-        <div style="font-size:11px;color:#64748b;margin-top:7px;line-height:1.5">
-          Se agrega a <strong style="color:#94a3b8">todas</strong> las direcciones extraídas antes de geocodificar.
-        </div>
-      </div>
-
       <button class="bbtn bbtn-g" onclick="goStep3()">
-<div style="margin:10px 0">
-<p style="color:#f59e0b;font-size:13px;font-weight:700;margin-bottom:6px">⚠️ Ciudad de las entregas (obligatorio)</p>
-<input id="extract-city-inp-img" type="text" placeholder="Ej: Venado Tuerto, Santa Fe" style="width:100%;padding:12px;background:#181818;border:2px solid #f59e0b;border-radius:12px;color:white;font-size:14px;box-sizing:border-box">
-</div>
         <i class="ti ti-sparkles"></i> Optimizar ruta
       </button>
       <button class="bbtn bbtn-d" onclick="runDemo()">
@@ -409,7 +399,7 @@
       </button>
     </div>
 
-    <!-- STEP 3: Processing + Results -->
+    <!-- STEP 3 -->
     <div class="wiz" id="ws3" style="display:none">
       <div class="wdots">
         <div class="wdot"></div>
@@ -444,7 +434,6 @@
             <i class="ti ti-zoom-fit-page" style="color:#60a5fa"></i>
           </button>
         </div>
-        <!-- Buttons ABOVE the list so they're always visible -->
         <div class="val-actions">
           <button class="bbtn bbtn-d val-act-back" onclick="cancelValidation()">
             <i class="ti ti-arrow-left"></i>
@@ -483,8 +472,7 @@
     </div>
   </div>
 
-
-  <!-- ══ SETTINGS ══ -->
+  <!-- SETTINGS -->
   <div class="screen" id="scr-settings">
     <div class="hdr">
       <button class="back" onclick="history.back()"><i class="ti ti-arrow-left"></i></button>
@@ -495,16 +483,13 @@
       <div class="cfg-card">
         <div class="cfg-lbl"><i class="ti ti-key"></i> Google Maps API Key</div>
         <div class="cfg-desc">Recomendado para ciudades pequeñas de Argentina. Sin clave se usa Nominatim como respaldo.</div>
-        <input class="finp" type="password" id="gmaps-key-inp"
-          placeholder="AIzaSy..."
-          autocomplete="off">
+        <input class="finp" type="password" id="gmaps-key-inp" placeholder="AIzaSy..." autocomplete="off">
         <div class="cfg-hint" id="gmaps-key-hint"></div>
       </div>
       <div class="cfg-card">
         <div class="cfg-lbl"><i class="ti ti-map-pin-2"></i> Ciudad base</div>
         <div class="cfg-desc">Se agrega automáticamente a las direcciones que no tienen ciudad al geocodificar.</div>
-        <input class="finp" type="text" id="city-inp"
-          placeholder="Ej: Venado Tuerto, Santa Fe, Argentina">
+        <input class="finp" type="text" id="city-inp" placeholder="Ej: Venado Tuerto, Santa Fe, Argentina">
         <div class="cfg-hint" id="city-hint"></div>
       </div>
       <button class="bbtn bbtn-g" style="margin-top:8px" onclick="saveSettings()">
@@ -513,8 +498,7 @@
     </div>
   </div>
 
-
-  <!-- ══ PIN MODAL ══ -->
+  <!-- PIN MODAL -->
   <div id="pin-modal" class="pin-modal" style="display:none">
     <div class="hdr">
       <button class="back" onclick="cancelPinPlacement()"><i class="ti ti-arrow-left"></i></button>
@@ -531,8 +515,7 @@
     </div>
   </div>
 
-</div><!-- /phone -->
-
+</div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="app.js"></script>
 </body>
