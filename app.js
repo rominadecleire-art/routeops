@@ -600,7 +600,8 @@ function goStep3() {
   }
   // City is mandatory for PDF and image uploads
   if (pendingPDF || pendingImages.length) {
-    var ecInp = document.getElementById('extract-city-inp');
+    var cityFieldId = pendingImages.length ? 'extract-city-inp-img' : 'extract-city-inp';
+    var ecInp = document.getElementById(cityFieldId);
     var ec = ecInp ? ecInp.value.trim() : '';
     if (!ec) {
       showToast('Escrib\xed la ciudad de las entregas antes de continuar', 'err');
@@ -617,8 +618,10 @@ function goStep3() {
 }
 
 function clearCityError() {
-  var inp = document.getElementById('extract-city-inp');
-  if (inp) inp.style.borderColor = '#1e3a5f';
+  ['extract-city-inp', 'extract-city-inp-img'].forEach(function(id) {
+    var inp = document.getElementById(id);
+    if (inp) inp.style.borderColor = '#1e3a5f';
+  });
 }
 
 function runDemo() {
@@ -994,9 +997,11 @@ async function runOptimization(txt, demoStops) {
     step(1, 'ok', 'Usando paradas manuales');
   }
 
-  // Apply city to ALL extracted addresses (before merging manual queue)
-  var ecInp = document.getElementById('extract-city-inp');
+  // Apply city to ALL stops including manual queue
+  var _cityFieldId = pendingImages.length ? 'extract-city-inp-img' : 'extract-city-inp';
+  var ecInp = document.getElementById(_cityFieldId);
   var ec = ecInp ? ecInp.value.trim() : '';
+  stops = stops.concat(manualQueue);
   if (ec && stops.length) {
     stops = stops.map(function(s) {
       if (!s.address) return s;
@@ -1007,8 +1012,6 @@ async function runOptimization(txt, demoStops) {
       return Object.assign({}, s, {address: addr});
     });
   }
-
-  stops = stops.concat(manualQueue);
   if (!stops.length) {
     showToast('Sin paradas para procesar', 'err');
     return;
@@ -1461,9 +1464,15 @@ function twoOptMatrix(route, mat, fromIdx) {
         var nj  = j === n - 1 ? fromIdx : best[j + 1];
         var bi  = best[i];
         var bj  = best[j];
-        var before = ((mat[pi] || [])[bi] || 0) + ((mat[bj] || [])[nj] || 0);
-        var after  = ((mat[pi] || [])[bj] || 0) + ((mat[bi] || [])[nj] || 0);
-        if (after < before - 1) {
+        // Full segment cost forward: pi→best[i]→...→best[j]→nj
+        var costFwd = ((mat[pi] || [])[bi] || 0);
+        for (var k = i; k < j; k++) costFwd += ((mat[best[k]] || [])[best[k + 1]] || 0);
+        costFwd += ((mat[bj] || [])[nj] || 0);
+        // Full segment cost reversed: pi→best[j]→...→best[i]→nj
+        var costRev = ((mat[pi] || [])[bj] || 0);
+        for (var k = j; k > i; k--) costRev += ((mat[best[k]] || [])[best[k - 1]] || 0);
+        costRev += ((mat[bi] || [])[nj] || 0);
+        if (costRev < costFwd - 1) {
           var lo = i, hi = j;
           while (lo < hi) {
             var tmp = best[lo]; best[lo] = best[hi]; best[hi] = tmp;
