@@ -96,15 +96,10 @@ var detIdx = -1;
 var mainMap = null, miniMap = null, routePolys = [], mapMarkers = [];
 var distMatrix = [], durMatrix = [];
 var pendingImages = [];
-var extractCity = '';
-
-var SAVED = [
-  {name:'Depósito Pardal',  address:'Pardal 267, Venado Tuerto, Santa Fe, Argentina',    lat:-33.7540455, lng:-61.9449982},
-  {name:'Depósito Colón',   address:'Av. Colón 1234, Venado Tuerto, Santa Fe, Argentina', lat:-33.748,     lng:-61.961},
-  {name:'Casa',             address:'San Martín 400, Venado Tuerto, Santa Fe, Argentina', lat:-33.7449,    lng:-61.9664},
-  {name:'Sucursal Rosario', address:'Pellegrini 890, Rosario, Santa Fe, Argentina',        lat:-32.9468,    lng:-60.6393},
-  {name:'Sucursal BsAs',   address:'Corrientes 1500, Buenos Aires, Argentina',            lat:-34.6037,    lng:-58.3816},
-];
+function loadFavorites() {
+  try { return JSON.parse(localStorage.getItem('routeops_fav') || '[]'); } catch(e) { return []; }
+}
+function saveFavorites(favs) { localStorage.setItem('routeops_fav', JSON.stringify(favs)); }
 
 var DEMO = [
   {name:'Supermercado Norte',  address:'Rivadavia 600, Venado Tuerto, Santa Fe, Argentina'},
@@ -201,11 +196,8 @@ function startWizard() {
   pendingImages = [];
   ['fi-cam','fi-gal'].forEach(function(id) { var el=document.getElementById(id); if(el) el.value=''; });
   renderImageList();
-  extractCity = '';
-  ['extract-city-inp', 'extract-city-inp-img'].forEach(function(id) {
-    var el = document.getElementById(id);
-    if (el) { el.value = ''; el.style.borderColor = '#1e3a5f'; }
-  });
+  var _ecInp = document.getElementById('extract-city-inp');
+  if (_ecInp) { _ecInp.value = ''; _ecInp.style.borderColor = '#1e3a5f'; }
   var depOk = document.getElementById('dep-ok');
   if (depOk) depOk.classList.remove('on');
   var audioRes = document.getElementById('audio-result');
@@ -275,7 +267,7 @@ function selPart(t) {
   if (t === 'saved') {
     // Re-apply the currently highlighted chip, or default to chip 0
     var sel = document.querySelector('.chip.sel');
-    if (sel) sel.click(); else pickSaved(0);
+    if (sel) sel.click(); else { var _f = loadFavorites(); if (_f.length) pickSaved(0); }
   } else {
     // Manual / GPS require explicit geocoding — clear any chip-inherited depot
     wizDepot = null;
@@ -290,11 +282,16 @@ function renderChips() {
   var el = document.getElementById('saved-chips');
   if (!el) return;
   el.innerHTML = '';
-  SAVED.forEach(function(s, i) {
+  var favs = loadFavorites();
+  if (!favs.length) {
+    el.innerHTML = '<div style="color:#475569;font-size:12px;padding:4px 0;line-height:1.6">No hay favoritos guardados.<br>Buscá una dirección en "Escribir direcci\xf3n" y toc\xe1 <i class="ti ti-star"></i> Guardar como favorito.</div>';
+    return;
+  }
+  favs.forEach(function(s, i) {
     el.innerHTML += '<div class="chip" id="chip-' + i + '" onclick="pickSaved(' + i + ')">' +
-      '<i class="ti ti-map-pin"></i>' + s.name + '</div>';
+      '<i class="ti ti-map-pin"></i>' + s.name +
+      '<span onclick="event.stopPropagation();deleteFavorite(' + i + ')" style="margin-left:6px;opacity:.55;font-size:11px" title="Eliminar">✕</span></div>';
   });
-  // Auto-select first saved point so "Continuar" works immediately
   pickSaved(0);
 }
 
@@ -302,8 +299,45 @@ function pickSaved(i) {
   document.querySelectorAll('.chip').forEach(function(c) { c.classList.remove('sel'); });
   var chip = document.getElementById('chip-' + i);
   if (chip) chip.classList.add('sel');
-  var s = SAVED[i];
+  var s = loadFavorites()[i];
+  if (!s) return;
   setWizDepot(s.name, s.address, s.lat, s.lng);
+}
+
+function showSaveFavForm() {
+  var form = document.getElementById('dep-fav-form');
+  var btn = document.getElementById('dep-fav-btn');
+  if (form) form.style.display = 'block';
+  if (btn) btn.style.display = 'none';
+  setTimeout(function() { var n = document.getElementById('dep-fav-name'); if (n) n.focus(); }, 50);
+}
+
+function hideSaveFavForm() {
+  var form = document.getElementById('dep-fav-form');
+  var btn = document.getElementById('dep-fav-btn');
+  if (form) { form.style.display = 'none'; var n = document.getElementById('dep-fav-name'); if (n) n.value = ''; }
+  if (btn) btn.style.display = '';
+}
+
+function doSaveFavorite() {
+  if (!wizDepot) return;
+  var nameInp = document.getElementById('dep-fav-name');
+  var name = nameInp ? nameInp.value.trim() : '';
+  if (!name) { showToast('Escrib\xed un nombre para el favorito', 'info'); if (nameInp) nameInp.focus(); return; }
+  var favs = loadFavorites();
+  favs.push({name: name, address: wizDepot.address, lat: wizDepot.lat, lng: wizDepot.lng});
+  saveFavorites(favs);
+  hideSaveFavForm();
+  renderChips();
+  showToast(name + ' guardado como favorito', 'ok');
+}
+
+function deleteFavorite(i) {
+  var favs = loadFavorites();
+  favs.splice(i, 1);
+  saveFavorites(favs);
+  renderChips();
+  showToast('Favorito eliminado', 'ok');
 }
 
 function setWizDepot(name, addr, lat, lng) {
@@ -566,11 +600,10 @@ function goStep3() {
   }
   // City is mandatory for PDF and image uploads
   if (pendingPDF || pendingImages.length) {
-    var ecId = pendingImages.length ? 'extract-city-inp-img' : 'extract-city-inp';
-    var ecInp = document.getElementById(ecId);
+    var ecInp = document.getElementById('extract-city-inp');
     var ec = ecInp ? ecInp.value.trim() : '';
     if (!ec) {
-      showToast('Escribí la ciudad de las entregas antes de continuar', 'err');
+      showToast('Escrib\xed la ciudad de las entregas antes de continuar', 'err');
       if (ecInp) {
         ecInp.style.borderColor = '#ef4444';
         ecInp.focus();
@@ -584,14 +617,17 @@ function goStep3() {
 }
 
 function clearCityError() {
-  ['extract-city-inp', 'extract-city-inp-img'].forEach(function(id) {
-    var inp = document.getElementById(id);
-    if (inp) inp.style.borderColor = '#1e3a5f';
-  });
+  var inp = document.getElementById('extract-city-inp');
+  if (inp) inp.style.borderColor = '#1e3a5f';
 }
 
 function runDemo() {
-  if (!wizDepot) wizDepot = Object.assign({}, SAVED[0], {isDepot: true});
+  if (!wizDepot) {
+    var _fv = loadFavorites();
+    wizDepot = _fv.length
+      ? Object.assign({}, _fv[0], {isDepot: true})
+      : {name:'Demo', address:'Venado Tuerto, Santa Fe, Argentina', lat:-33.7464, lng:-61.9673, isDepot:true};
+  }
   showWS(3);
   runOptimization('', DEMO);
 }
@@ -607,6 +643,8 @@ function switchMethod(m) {
     if (tab) tab.classList.toggle('act', x === m);
     if (panel) panel.style.display = x === m ? 'block' : 'none';
   });
+  var cw = document.getElementById('city-extract-wrap');
+  if (cw) cw.style.display = (m === 'pdf' || m === 'image') ? 'block' : 'none';
   if (m === 'audio') initAudio();
 }
 
@@ -957,9 +995,7 @@ async function runOptimization(txt, demoStops) {
   }
 
   // Apply city to ALL extracted addresses (before merging manual queue)
-  var ecInp = pendingImages.length
-    ? document.getElementById('extract-city-inp-img')
-    : document.getElementById('extract-city-inp');
+  var ecInp = document.getElementById('extract-city-inp');
   var ec = ecInp ? ecInp.value.trim() : '';
   if (ec && stops.length) {
     stops = stops.map(function(s) {
