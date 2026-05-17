@@ -48,7 +48,7 @@ def _init_db():
                 resolved_addr TEXT,
                 hit_count    INTEGER DEFAULT 1,
                 created_at   TEXT DEFAULT (CURRENT_TIMESTAMP),
-                last_hit     TEXT DEFAULT (datetime("now"))
+                last_hit     TEXT DEFAULT (CURRENT_TIMESTAMP)
             )
         ''')
         conn.commit()
@@ -529,7 +529,7 @@ def geocache_lookup():
         ).fetchone()
         if row:
             conn.execute(
-                'UPDATE geocache SET hit_count = hit_count + 1, last_hit = datetime("now") WHERE addr_key = ?',
+                'UPDATE geocache SET hit_count = hit_count + 1, last_hit = CURRENT_TIMESTAMP WHERE addr_key = ?',
                 (key,)
             )
             conn.commit()
@@ -560,7 +560,7 @@ def geocache_save():
                 lat = excluded.lat, lng = excluded.lng,
                 resolved_addr = excluded.resolved_addr,
                 hit_count = hit_count + 1,
-                last_hit = datetime("now")
+                last_hit = CURRENT_TIMESTAMP
         ''', (key, addr, float(lat), float(lng), resolved))
         conn.commit()
         conn.close()
