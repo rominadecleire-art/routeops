@@ -47,7 +47,7 @@ def _init_db():
                 lng          REAL NOT NULL,
                 resolved_addr TEXT,
                 hit_count    INTEGER DEFAULT 1,
-                created_at   TEXT DEFAULT (datetime("now")),
+                created_at   TEXT DEFAULT (CURRENT_TIMESTAMP),
                 last_hit     TEXT DEFAULT (datetime("now"))
             )
         ''')
