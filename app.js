@@ -1926,15 +1926,14 @@ function waitForValidation(geocoded) {
 
 function showValidation(geocoded) {
   valStops = geocoded.map(function(s) {
-    return Object.assign({}, s, {removed: false, status: 'ok', distFromCenter: null});
+    return Object.assign({}, s, {removed: false});
   });
-  detectOutliers(valStops);
 
   document.getElementById('proc-wrap').style.display = 'none';
   document.getElementById('steps-box').style.display = 'none';
-  document.getElementById('ws3-t').textContent = 'Revisá las paradas';
+  document.getElementById('ws3-t').textContent = 'Paradas detectadas';
   document.getElementById('ws3-s').textContent =
-    'Salida: ' + DEPOT.name + ' · Verificá que cada dirección esté bien ubicada.';
+    geocoded.length + ' paradas \xb7 ' + DEPOT.name + ' \xb7 Asign\xe1 horarios si quer\xe9s';
   document.getElementById('ws-val').style.display = 'block';
 
   renderValSummary();
@@ -1998,13 +1997,11 @@ function fitValMap() {
 
 function renderValSummary() {
   var active = valStops.filter(function(s) { return !s.removed; });
-  var out = active.filter(function(s) { return s.status === 'outlier'; }).length;
-  var fail = active.filter(function(s) { return s.status === 'failed'; }).length;
+  var fail = active.filter(function(s) { return !s.lat || !s.lng; }).length;
   var el = document.getElementById('val-summary');
   if (!el) return;
   var txt = active.length + ' parada' + (active.length !== 1 ? 's' : '');
-  if (out) txt += ' &middot; <span style="color:#fbbf24">' + out + ' ubicaci\xf3n sospechosa' + (out > 1 ? 's' : '') + '</span>';
-  if (fail) txt += ' &middot; <span style="color:#f87171">' + fail + ' sin geocodificar</span>';
+  if (fail) txt += ' \xb7 <span style="color:#f87171">' + fail + ' sin geocodificar</span>';
   el.innerHTML = txt;
 }
 
@@ -2014,28 +2011,6 @@ function renderValList() {
   el.innerHTML = '';
   valStops.forEach(function(s, i) {
     if (s.removed) return;
-    var sc = s.status === 'outlier' ? 'val-err' : s.status === 'failed' ? 'val-warn' : '';
-    var nc = s.status === 'outlier' ? 'val-num-err' : s.status === 'failed' ? 'val-num-warn' : 'val-num-ok';
-    var tag = '';
-    var pinBtn = '<br><button class="val-pin-btn" onclick="openPinPlacement(' + i + ')">' +
-      '<i class="ti ti-map-pin-plus"></i> Ajustar en mapa</button>';
-    if (s.status === 'outlier') {
-      tag = '<span class="val-tag err"><i class="ti ti-alert-triangle"></i> Ubicaci\xf3n sospechosa' +
-        (s.distFromCenter ? ' \xb7 ' + s.distFromCenter.toFixed(0) + ' km del grupo' : '') + '</span>' + pinBtn;
-    } else if (s.manualPin) {
-      tag = '<span class="val-tag" style="background:rgba(52,211,153,.1);color:#34d399;display:inline-flex;align-items:center;gap:3px;margin-top:4px">' +
-        '<i class="ti ti-map-pin-check"></i> Ubicado en mapa</span>';
-    } else if (s.fallbackToCity) {
-      tag = '<span class="val-tag" style="background:rgba(245,158,11,.1);color:#f59e0b;display:inline-flex;align-items:center;gap:3px;margin-top:4px">' +
-        '<i class="ti ti-map-pin-exclamation"></i> No encontrado exacto \xb7 usando centro de ciudad</span>' + pinBtn;
-    } else if (s.approxGeocode) {
-      tag = '<span class="val-tag" style="background:rgba(245,158,11,.1);color:#f59e0b;display:inline-flex;align-items:center;gap:3px;margin-top:4px">' +
-        '<i class="ti ti-map-pin-exclamation"></i> Geocodificaci\xf3n aproximada</span>' + pinBtn;
-    } else if (s.status === 'failed') {
-      tag = '<span class="val-tag warn"><i class="ti ti-map-pin-off"></i> Sin coordenadas exactas</span>' + pinBtn;
-    }
-    var dist = (s.distFromCenter != null && s.status === 'ok' && s.distFromCenter > 0.2)
-      ? '<div class="val-dist">' + s.distFromCenter.toFixed(1) + ' km del centro del grupo</div>' : '';
     var dlBadge = s.deadline
       ? '<div style="display:inline-flex;align-items:center;gap:4px;background:rgba(245,158,11,.15);color:#f59e0b;border-radius:6px;padding:3px 8px;font-size:11px;font-weight:600;margin-top:5px">' +
         '<i class="ti ti-clock-hour-4"></i> antes de las ' + s.deadline + '</div>'
@@ -2044,18 +2019,20 @@ function renderValList() {
     var dlClearBtn = s.deadline
       ? '<button onclick="clearDeadline(' + i + ')" style="background:#374151;border:none;border-radius:8px;color:#9ca3af;padding:6px 10px;cursor:pointer;font-size:12px">Quitar</button>'
       : '';
+    var noCoords = (!s.lat || !s.lng)
+      ? '<div style="display:inline-flex;align-items:center;gap:4px;color:#f87171;font-size:11px;margin-top:4px"><i class="ti ti-map-pin-off"></i> Sin coordenadas — se omitir\xe1</div>'
+      : '';
     el.innerHTML +=
-      '<div class="val-card ' + sc + '" id="vc-' + i + '" style="' + dlStyle + '">' +
+      '<div class="val-card" id="vc-' + i + '" style="' + dlStyle + '">' +
         '<div class="val-card-top">' +
-          '<div class="val-num ' + nc + '">' + (i + 1) + '</div>' +
+          '<div class="val-num val-num-ok">' + (i + 1) + '</div>' +
           '<div class="val-info">' +
             '<div class="val-name">' + s.name + '</div>' +
             '<div class="val-addr">' + (s.resolvedAddress || s.address) + '</div>' +
-            dist + tag + dlBadge +
+            dlBadge + noCoords +
           '</div>' +
           '<div class="val-btns">' +
             '<button class="val-btn" onclick="toggleDeadline(' + i + ')" title="Horario l\xedmite" style="' + (s.deadline ? 'color:#f59e0b' : '') + '"><i class="ti ti-clock"></i></button>' +
-            '<button class="val-btn" onclick="editValStop(' + i + ')" title="Editar"><i class="ti ti-pencil"></i></button>' +
             '<button class="val-btn val-btn-del" onclick="removeValStop(' + i + ')" title="Eliminar"><i class="ti ti-trash"></i></button>' +
           '</div>' +
         '</div>' +
@@ -2068,16 +2045,6 @@ function renderValList() {
             '<button onclick="confirmDeadline(' + i + ')" style="background:#34d399;border:none;border-radius:8px;color:#000;padding:7px 12px;cursor:pointer;font-size:14px"><i class="ti ti-check"></i></button>' +
             dlClearBtn +
           '</div>' +
-        '</div>' +
-        '<div class="val-edit-form" id="vef-' + i + '" style="display:none">' +
-          '<input class="finp" id="vei-' + i + '" type="text" placeholder="Direcci\xf3n completa" style="margin-bottom:8px">' +
-          '<div style="display:flex;gap:8px">' +
-            '<button class="bbtn bbtn-g" style="margin:0;flex:1;padding:10px;font-size:12px" onclick="regeocodeValStop(' + i + ')">' +
-              '<i class="ti ti-search"></i> Buscar' +
-            '</button>' +
-            '<button class="bbtn bbtn-d" style="margin:0;padding:10px;font-size:12px" onclick="cancelEditValStop(' + i + ')">Cancelar</button>' +
-          '</div>' +
-          '<div class="val-geo-msg" id="vgm-' + i + '"></div>' +
         '</div>' +
       '</div>';
   });
