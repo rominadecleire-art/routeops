@@ -208,16 +208,12 @@ function startWizard() {
   var pw = document.getElementById('proc-wrap');
   if (pw) pw.style.display = '';
   document.getElementById('wresults').style.display = 'none';
-  document.getElementById('ws-val').style.display = 'none';
   var sb = document.getElementById('steps-box');
   if (sb) sb.style.display = 'block';
   document.getElementById('ws3-t').textContent = 'Optimizando...';
   document.getElementById('ws3-s').textContent = 'Calculando el recorrido más corto por calles reales';
-  if (validationResolve) { validationResolve(null); validationResolve = null; }
-  if (valMap) { valMap.remove(); valMap = null; }
   if (pinLMap) { pinLMap.remove(); pinLMap = null; pinLMarker = null; }
   document.getElementById('pin-modal').style.display = 'none';
-  valMarkers = []; valStops = [];
 
   // Show step 1 and render chips
   showWS(1);
@@ -238,12 +234,7 @@ function wizardBack() {
   var ws3 = document.getElementById('ws3');
   var ws2 = document.getElementById('ws2');
   if (ws3 && ws3.style.display !== 'none') {
-    var wsVal = document.getElementById('ws-val');
-    if (wsVal && wsVal.style.display !== 'none') {
-      cancelValidation();
-    } else {
-      showWS(2);
-    }
+    showWS(2);
   } else if (ws2 && ws2.style.display !== 'none') {
     showWS(1);
   } else {
@@ -1030,11 +1021,8 @@ async function runOptimization(txt, demoStops) {
   }
   step(2, 'ok', geoOk + ' de ' + stops.length + ' geocodificadas');
 
-  var confirmed = await waitForValidation(geocoded);
-  if (!confirmed) return;
-
-  var withCoords = confirmed.filter(function(s) { return s.lat && s.lng; });
-  var noCoords   = confirmed.filter(function(s) { return !s.lat || !s.lng; });
+  var withCoords = geocoded.filter(function(s) { return s.lat && s.lng; });
+  var noCoords   = geocoded.filter(function(s) { return !s.lat || !s.lng; });
 
   if (withCoords.length < 1) {
     showToast('Sin paradas válidas para optimizar', 'err');
@@ -1889,259 +1877,6 @@ function geocodeOne(addr) {
   return geocodeFull(addr);
 }
 
-// ════════════════════════════════════════
-// GEOCODE VALIDATION
-// ════════════════════════════════════════
-var valMap = null, valMarkers = [], valStops = [], validationResolve = null;
-
-function detectOutliers(stops) {
-  var valid = stops.filter(function(s) { return s.lat && s.lng; });
-  if (valid.length < 3) {
-    stops.forEach(function(s) {
-      s.status = (s.lat && s.lng) ? 'ok' : 'failed';
-      s.distFromCenter = s.lat ? 0 : null;
-    });
-    return;
-  }
-  var cLat = valid.reduce(function(a, s) { return a + s.lat; }, 0) / valid.length;
-  var cLng = valid.reduce(function(a, s) { return a + s.lng; }, 0) / valid.length;
-  var dists = valid.map(function(s) { return hav(s.lat, s.lng, cLat, cLng); });
-  var sorted = dists.slice().sort(function(a, b) { return a - b; });
-  var median = sorted[Math.floor(sorted.length / 2)];
-  var threshold = Math.max(3 * median, 30);
-  stops.forEach(function(s) {
-    if (!s.lat || !s.lng) { s.status = 'failed'; s.distFromCenter = null; return; }
-    var d = hav(s.lat, s.lng, cLat, cLng);
-    s.distFromCenter = d;
-    s.status = d > threshold ? 'outlier' : 'ok';
-  });
-}
-
-function waitForValidation(geocoded) {
-  return new Promise(function(resolve) {
-    validationResolve = resolve;
-    showValidation(geocoded);
-  });
-}
-
-function showValidation(geocoded) {
-  valStops = geocoded.map(function(s) {
-    return Object.assign({}, s, {removed: false});
-  });
-
-  document.getElementById('proc-wrap').style.display = 'none';
-  document.getElementById('steps-box').style.display = 'none';
-  document.getElementById('ws3-t').textContent = 'Paradas detectadas';
-  document.getElementById('ws3-s').textContent =
-    geocoded.length + ' paradas \xb7 ' + DEPOT.name + ' \xb7 Asign\xe1 horarios si quer\xe9s';
-  document.getElementById('ws-val').style.display = 'block';
-
-  renderValSummary();
-  renderValList();
-  setTimeout(function() {
-    if (valMap) { valMap.remove(); valMap = null; }
-    initValMap();
-    // Second tick: invalidateSize so the container has real dimensions, then fitBounds
-    setTimeout(function() {
-      if (valMap) { valMap.invalidateSize(); drawValMap(); }
-    }, 60);
-    var ws3 = document.getElementById('ws3');
-    if (ws3) ws3.scrollTop = 0;
-  }, 80);
-}
-
-function initValMap() {
-  if (valMap) { valMap.invalidateSize(); return; }
-  valMap = L.map('val-map', {
-    zoomControl: false, attributionControl: false,
-    scrollWheelZoom: false, dragging: true, touchZoom: true,
-  }).setView([-33.74, -61.55], 12);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom: 19}).addTo(valMap);
-}
-
-function drawValMap() {
-  if (!valMap) return;
-  valMarkers.forEach(function(m) { valMap.removeLayer(m); });
-  valMarkers = [];
-
-  if (DEPOT && DEPOT.lat) {
-    var di = L.divIcon({html:'<div style="width:22px;height:22px;border-radius:50%;background:#f59e0b;border:2px solid rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;font-size:12px">🏠</div>',iconSize:[22,22],iconAnchor:[11,11],className:''});
-    valMarkers.push(L.marker([DEPOT.lat, DEPOT.lng], {icon: di}).addTo(valMap));
-  }
-  valStops.forEach(function(s, i) {
-    if (s.removed || !s.lat || !s.lng) return;
-    var col = s.status === 'outlier' ? '#ef4444' : s.status === 'failed' ? '#6b7280' : '#34d399';
-    var ic = L.divIcon({
-      html: '<div style="width:22px;height:22px;border-radius:50%;background:'+col+';border:2px solid rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#fff">'+(i+1)+'</div>',
-      iconSize: [22,22], iconAnchor: [11,11], className: '',
-    });
-    var mk = L.marker([s.lat, s.lng], {icon: ic})
-      .bindPopup('<b>'+(i+1)+'. '+s.name+'</b><br><small>'+(s.resolvedAddress||s.address)+'</small>')
-      .addTo(valMap);
-    valMarkers.push(mk);
-  });
-
-  valMap.invalidateSize();
-  if (valMarkers.length > 0) {
-    var group = L.featureGroup(valMarkers);
-    valMap.fitBounds(group.getBounds(), {padding: [30, 30]});
-  }
-}
-
-function fitValMap() {
-  if (!valMap) return;
-  var pts = valStops.filter(function(s) { return !s.removed && s.lat && s.lng; }).map(function(s) { return [s.lat, s.lng]; });
-  if (DEPOT && DEPOT.lat) pts.push([DEPOT.lat, DEPOT.lng]);
-  if (pts.length > 1) valMap.fitBounds(L.latLngBounds(pts), {padding: [28, 28]});
-}
-
-function renderValSummary() {
-  var active = valStops.filter(function(s) { return !s.removed; });
-  var fail = active.filter(function(s) { return !s.lat || !s.lng; }).length;
-  var el = document.getElementById('val-summary');
-  if (!el) return;
-  var txt = active.length + ' parada' + (active.length !== 1 ? 's' : '');
-  if (fail) txt += ' \xb7 <span style="color:#f87171">' + fail + ' sin geocodificar</span>';
-  el.innerHTML = txt;
-}
-
-function renderValList() {
-  var el = document.getElementById('val-list');
-  if (!el) return;
-  el.innerHTML = '';
-  valStops.forEach(function(s, i) {
-    if (s.removed) return;
-    var dlBadge = s.deadline
-      ? '<div style="display:inline-flex;align-items:center;gap:4px;background:rgba(245,158,11,.15);color:#f59e0b;border-radius:6px;padding:3px 8px;font-size:11px;font-weight:600;margin-top:5px">' +
-        '<i class="ti ti-clock-hour-4"></i> antes de las ' + s.deadline + '</div>'
-      : '';
-    var dlStyle = s.deadline ? 'border-left:3px solid #f59e0b;' : '';
-    var dlClearBtn = s.deadline
-      ? '<button onclick="clearDeadline(' + i + ')" style="background:#374151;border:none;border-radius:8px;color:#9ca3af;padding:6px 10px;cursor:pointer;font-size:12px">Quitar</button>'
-      : '';
-    var noCoords = (!s.lat || !s.lng)
-      ? '<div style="display:inline-flex;align-items:center;gap:4px;color:#f87171;font-size:11px;margin-top:4px"><i class="ti ti-map-pin-off"></i> Sin coordenadas — se omitir\xe1</div>'
-      : '';
-    el.innerHTML +=
-      '<div class="val-card" id="vc-' + i + '" style="' + dlStyle + '">' +
-        '<div class="val-card-top">' +
-          '<div class="val-num val-num-ok">' + (i + 1) + '</div>' +
-          '<div class="val-info">' +
-            '<div class="val-name">' + s.name + '</div>' +
-            '<div class="val-addr">' + (s.resolvedAddress || s.address) + '</div>' +
-            dlBadge + noCoords +
-          '</div>' +
-          '<div class="val-btns">' +
-            '<button class="val-btn" onclick="toggleDeadline(' + i + ')" title="Horario l\xedmite" style="' + (s.deadline ? 'color:#f59e0b' : '') + '"><i class="ti ti-clock"></i></button>' +
-            '<button class="val-btn val-btn-del" onclick="removeValStop(' + i + ')" title="Eliminar"><i class="ti ti-trash"></i></button>' +
-          '</div>' +
-        '</div>' +
-        '<div id="vdlf-' + i + '" style="display:none;margin-top:8px;background:#0c1c2e;border-radius:10px;padding:10px 12px">' +
-          '<div style="font-size:10px;color:#475569;font-weight:700;letter-spacing:.06em;text-transform:uppercase;margin-bottom:7px">Horario l\xedmite de entrega</div>' +
-          '<div style="display:flex;align-items:center;gap:8px">' +
-            '<span style="font-size:12px;color:#94a3b8;flex-shrink:0">Antes de las</span>' +
-            '<input type="time" id="vdli-' + i + '" value="' + (s.deadline || '12:00') + '" ' +
-              'style="flex:1;background:#162842;border:1px solid #1e3a5f;border-radius:8px;padding:6px 10px;color:#e2e8f0;font-size:14px;font-family:\'DM Sans\',sans-serif;outline:none">' +
-            '<button onclick="confirmDeadline(' + i + ')" style="background:#34d399;border:none;border-radius:8px;color:#000;padding:7px 12px;cursor:pointer;font-size:14px"><i class="ti ti-check"></i></button>' +
-            dlClearBtn +
-          '</div>' +
-        '</div>' +
-      '</div>';
-  });
-}
-
-function editValStop(i) {
-  var form = document.getElementById('vef-' + i);
-  var inp = document.getElementById('vei-' + i);
-  if (!form || !inp) return;
-  inp.value = valStops[i].resolvedAddress || valStops[i].address || '';
-  form.style.display = 'block';
-  setTimeout(function() { inp.focus(); }, 50);
-}
-
-function cancelEditValStop(i) {
-  var f = document.getElementById('vef-' + i);
-  if (f) f.style.display = 'none';
-}
-
-function toggleDeadline(i) {
-  var form = document.getElementById('vdlf-' + i);
-  if (!form) return;
-  form.style.display = form.style.display === 'none' ? 'block' : 'none';
-  if (form.style.display === 'block') {
-    setTimeout(function() { var inp = document.getElementById('vdli-' + i); if (inp) inp.focus(); }, 50);
-  }
-}
-
-function confirmDeadline(i) {
-  var inp = document.getElementById('vdli-' + i);
-  if (!inp || !inp.value) return;
-  valStops[i].deadline = inp.value;
-  renderValList();
-}
-
-function clearDeadline(i) {
-  valStops[i].deadline = null;
-  renderValList();
-}
-
-function removeValStop(i) {
-  valStops[i].removed = true;
-  detectOutliers(valStops.filter(function(s) { return !s.removed; }));
-  renderValList();
-  renderValSummary();
-  drawValMap();
-}
-
-async function regeocodeValStop(i) {
-  var inp = document.getElementById('vei-' + i);
-  var msg = document.getElementById('vgm-' + i);
-  if (!inp) return;
-  var addr = inp.value.trim();
-  if (!addr) return;
-  if (msg) msg.innerHTML = '<span style="color:#60a5fa">Buscando…</span>';
-
-  var g = await geocodeFull(addr);
-
-  if (!g.lat) {
-    // No city configured and all geocoding failed — offer pin placement (non-blocking)
-    if (msg) msg.innerHTML =
-      '<button class="val-pin-btn" style="margin-top:4px" onclick="openPinPlacement(' + i + ')">' +
-      '<i class="ti ti-map-pin-plus"></i> Marcar en mapa</button>';
-    return;
-  }
-
-  valStops[i].lat = g.lat;
-  valStops[i].lng = g.lng;
-  valStops[i].resolvedAddress = g.resolvedAddress;
-  valStops[i].address = addr;
-  valStops[i].approxGeocode = g.approx;
-  detectOutliers(valStops.filter(function(s) { return !s.removed; }));
-  renderValList();
-  renderValSummary();
-  drawValMap();
-}
-
-function confirmValidation() {
-  var active = valStops.filter(function(s) { return !s.removed && s.lat && s.lng; });
-  if (!active.length) { showToast('Necesit\xe1s al menos una parada v\xe1lida', 'err'); return; }
-  if (!validationResolve) return;
-  validationResolve(valStops.filter(function(s) { return !s.removed; }));
-  validationResolve = null;
-  hideValidation();
-}
-
-function cancelValidation() {
-  if (validationResolve) { validationResolve(null); validationResolve = null; }
-  document.getElementById('ws-val').style.display = 'none';
-  document.getElementById('steps-box').style.display = 'block';
-  if (valMap) { valMap.remove(); valMap = null; }
-  if (pinLMap) { pinLMap.remove(); pinLMap = null; pinLMarker = null; }
-  document.getElementById('pin-modal').style.display = 'none';
-  valMarkers = []; valStops = [];
-  showWS(2);
-}
-
 // ── Pin placement modal ───────────────────────────────────────────────────────
 var pinLMap = null, pinLMarker = null, pinTargetIdx = -1, pinTargetType = 'stop';
 
@@ -2173,13 +1908,6 @@ async function _openPinModal(title, startLat, startLng) {
   setTimeout(function() { _initPinMap(startLat, startLng); }, 80);
 }
 
-async function openPinPlacement(i) {
-  pinTargetType = 'stop';
-  pinTargetIdx = i;
-  var s = valStops[i];
-  await _openPinModal(s.name, s.lat || null, s.lng || null);
-}
-
 async function openPinPlacementForDepot() {
   pinTargetType = 'depot';
   pinTargetIdx = -1;
@@ -2202,35 +1930,11 @@ function confirmPinPlacement() {
     pinTargetIdx = -1;
     return;
   }
-
-  var s = valStops[pinTargetIdx];
-  s.lat = ll.lat;
-  s.lng = ll.lng;
-  s.manualPin = true;
-  s.approxGeocode = false;
-  s.fallbackToCity = false;
-  s.status = 'ok';
-  s.distFromCenter = null;
-  detectOutliers(valStops.filter(function(v) { return !v.removed; }));
-  pinTargetIdx = -1;
-  renderValList();
-  renderValSummary();
-  drawValMap();
-  showToast('Ubicaci\xf3n guardada manualmente', 'ok');
 }
 
 function cancelPinPlacement() {
   document.getElementById('pin-modal').style.display = 'none';
   pinTargetIdx = -1;
-}
-
-function hideValidation() {
-  document.getElementById('ws-val').style.display = 'none';
-  document.getElementById('steps-box').style.display = 'block';
-  document.getElementById('ws3-t').textContent = 'Optimizando…';
-  document.getElementById('ws3-s').textContent = 'Calculando el recorrido m\xe1s corto por calles reales';
-  var ws3 = document.getElementById('ws3');
-  if (ws3) ws3.scrollTop = 0;
 }
 
 // ════════════════════════════════════════
