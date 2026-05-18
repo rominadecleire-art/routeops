@@ -96,6 +96,7 @@ var detIdx = -1;
 var mainMap = null, miniMap = null, routePolys = [], mapMarkers = [];
 var distMatrix = [], durMatrix = [];
 var pendingImages = [];
+var _lastResultKm = 0, _lastResultSaved = 0, _lastResultMin = 0;
 function loadFavorites() {
   try { return JSON.parse(localStorage.getItem('routeops_fav') || '[]'); } catch(e) { return []; }
 }
@@ -1941,15 +1942,19 @@ function cancelPinPlacement() {
 // RESULTS UI
 // ════════════════════════════════════════
 function showResults(stops, km, saved, totalMin) {
+  _lastResultKm = km;
+  _lastResultSaved = saved;
+  _lastResultMin = totalMin || 0;
+
   var pw = document.getElementById('proc-wrap');
   if (pw) pw.style.display = 'none';
   document.getElementById('wresults').style.display = 'block';
-  document.getElementById('ws3-t').textContent = '¡Ruta lista!';
+  document.getElementById('ws3-t').textContent = '\xa1Ruta lista!';
   document.getElementById('ws3-s').textContent = 'Distancias calculadas por calles reales';
 
   var del = stops.filter(function(s) { return !s.isDepot && !s.isCityHeader; });
   document.getElementById('r-sub').textContent =
-    del.length + ' paradas · sale desde ' + DEPOT.name;
+    del.length + ' paradas \xb7 sale desde ' + DEPOT.name;
   document.getElementById('r-stops').textContent = del.length;
   document.getElementById('r-km').textContent = km.toFixed(1) + ' km';
   document.getElementById('r-min').textContent = (totalMin || '—') + ' min';
@@ -1983,23 +1988,137 @@ function showResults(stops, km, saved, totalMin) {
         '</div>';
       return;
     }
-    var dotStyle = s.cityColor ? ' border-left:3px solid ' + s.cityColor + ';padding-left:10px;' : '';
+    var dlBorder = (!s.isDepot && s.deadline) ? 'border-left:3px solid #f59e0b;' : '';
+    var cityBorder = s.cityColor ? 'border-left:3px solid ' + s.cityColor + ';padding-left:10px;' : '';
+    var dotStyle = dlBorder || cityBorder;
+    var dlBadge = (!s.isDepot && s.deadline)
+      ? '<div style="display:inline-flex;align-items:center;gap:3px;color:#f59e0b;font-size:10px;font-weight:600;margin-top:2px"><i class="ti ti-clock-hour-4"></i> antes de las ' + s.deadline + '</div>'
+      : '';
+    var dlClearBtn = (!s.isDepot && s.deadline)
+      ? '<button onclick="clearResultDeadline(' + i + ')" style="background:#374151;border:none;border-radius:6px;color:#9ca3af;padding:4px 8px;cursor:pointer;font-size:11px;flex-shrink:0">Quitar</button>'
+      : '';
+    var clockBtn = !s.isDepot
+      ? '<button onclick="toggleResultDeadline(' + i + ')" title="Horario l\xedmite" style="background:none;border:none;cursor:pointer;font-size:15px;padding:2px 4px;color:' + (s.deadline ? '#f59e0b' : '#475569') + '"><i class="ti ti-clock"></i></button>'
+      : '';
     el.innerHTML +=
-      '<div class="eitem ' + (s.isDepot ? 'is-dep' : '') + '" style="' + dotStyle + '">' +
+      '<div class="eitem ' + (s.isDepot ? 'is-dep' : '') + '" id="ri-' + i + '" style="' + dotStyle + '">' +
         '<div class="enum ' + (s.isDepot ? 'dep' : '') + '">' + (s.isDepot ? '🏠' : (s.order || i)) + '</div>' +
         '<div class="einf">' +
           '<div class="en">' + s.name + '</div>' +
           '<div class="ea">' + (s.address || '').split(',').slice(0, 2).join(',') + '</div>' +
+          dlBadge +
         '</div>' +
-        '<div class="emeta">' + dk + dt + '</div>' +
+        '<div class="emeta">' + dk + dt + clockBtn + '</div>' +
+      '</div>' +
+      '<div id="rdlf-' + i + '" style="display:none;padding:8px 12px 10px;background:#0c1c2e;border-radius:0 0 10px 10px;margin:-4px 0 4px">' +
+        '<div style="display:flex;align-items:center;gap:8px">' +
+          '<span style="font-size:11px;color:#94a3b8;flex-shrink:0">Antes de las</span>' +
+          '<input type="time" id="rdli-' + i + '" value="' + (s.deadline || '12:00') + '" style="flex:1;background:#162842;border:1px solid #1e3a5f;border-radius:8px;padding:5px 8px;color:#e2e8f0;font-size:13px;outline:none">' +
+          '<button onclick="confirmResultDeadline(' + i + ')" style="background:#34d399;border:none;border-radius:8px;color:#000;padding:6px 10px;cursor:pointer;font-size:13px"><i class="ti ti-check"></i></button>' +
+          dlClearBtn +
+        '</div>' +
       '</div>';
   });
+
+  var hasDl = R.some(function(s) { return !s.isDepot && !s.isCityHeader && !s.isReturn && !!s.deadline; });
+  if (hasDl) {
+    el.innerHTML +=
+      '<button class="bbtn bbtn-g" style="margin-top:8px;font-size:13px;width:100%" onclick="reoptimizeWithDeadlines()">' +
+        '<i class="ti ti-refresh"></i> Reoptimizar con horarios' +
+      '</button>';
+  }
+
   var ws3 = document.getElementById('ws3');
   if (ws3) setTimeout(function() { ws3.scrollTop = ws3.scrollHeight; }, 80);
 }
 
+function toggleResultDeadline(rIdx) {
+  var form = document.getElementById('rdlf-' + rIdx);
+  if (!form) return;
+  form.style.display = form.style.display === 'none' ? 'block' : 'none';
+  if (form.style.display === 'block') {
+    setTimeout(function() { var inp = document.getElementById('rdli-' + rIdx); if (inp) inp.focus(); }, 50);
+  }
+}
+
+function confirmResultDeadline(rIdx) {
+  var inp = document.getElementById('rdli-' + rIdx);
+  if (!inp || !inp.value) return;
+  R[rIdx].deadline = inp.value;
+  saveRouteToStorage();
+  showResults(R, _lastResultKm, _lastResultSaved, _lastResultMin);
+}
+
+function clearResultDeadline(rIdx) {
+  R[rIdx].deadline = null;
+  saveRouteToStorage();
+  showResults(R, _lastResultKm, _lastResultSaved, _lastResultMin);
+}
+
+function reoptimizeWithDeadlines() {
+  var stops = R.filter(function(s) { return !s.isDepot && !s.isCityHeader && !s.isReturn; });
+  if (!stops.length) return;
+
+  var prio = stops.filter(function(s) { return !!s.deadline; });
+  var norm = stops.filter(function(s) { return !s.deadline; });
+  prio.sort(function(a, b) { return (a.deadline || '').localeCompare(b.deadline || ''); });
+
+  var prioIdx = prio.map(function(s) { return s.order; });
+  var normIdx = norm.map(function(s) { return s.order; });
+
+  var pRoute = prioIdx.length === 0 ? [] :
+    prioIdx.length === 1 ? prioIdx.slice() :
+    twoOptMatrix(nnFromMatrix(0, prioIdx.slice(), distMatrix), distMatrix, 0).route;
+
+  var fromP = pRoute.length ? pRoute[pRoute.length - 1] : 0;
+
+  var nRoute = normIdx.length === 0 ? [] :
+    normIdx.length === 1 ? normIdx.slice() :
+    orOpt1(twoOptMatrix(nnFromMatrix(fromP, normIdx.slice(), distMatrix), distMatrix, fromP).route, distMatrix).route;
+
+  var optRoute = pRoute.concat(nRoute);
+
+  var byIdx = {};
+  stops.forEach(function(s) { byIdx[s.order] = s; });
+
+  var cumMin = 0;
+  var fullRoute = [{
+    name: DEPOT.name, address: DEPOT.address, lat: DEPOT.lat, lng: DEPOT.lng,
+    isDepot: true, done: false, failed: false, distKm: '0', durMin: 0, cumMin: 0, order: 0,
+    eta: 'Punto de salida'
+  }];
+
+  optRoute.forEach(function(idx, pos) {
+    var s = byIdx[idx];
+    var prevIdx = pos === 0 ? 0 : optRoute[pos - 1];
+    var dM = ((distMatrix[prevIdx] || [])[idx] || 0) / 1000;
+    var durS = (durMatrix[prevIdx] || [])[idx] || 0;
+    var durM = Math.round(durS / 60);
+    cumMin += durM + 2;
+    fullRoute.push(Object.assign({}, s, {
+      order: pos + 1, distKm: dM.toFixed(2), durMin: durM, cumMin: cumMin, eta: fmtMin(cumMin)
+    }));
+  });
+
+  var lastIdx = optRoute.length ? optRoute[optRoute.length - 1] : 0;
+  var retM = ((distMatrix[lastIdx] || [])[0] || 0);
+  var retDurM = Math.round(((durMatrix[lastIdx] || [])[0] || 0) / 60);
+  cumMin += retDurM;
+  fullRoute.push({
+    name: DEPOT.name, address: DEPOT.address, lat: DEPOT.lat, lng: DEPOT.lng,
+    isDepot: true, isReturn: true, done: false, failed: false, order: 0,
+    distKm: (retM / 1000).toFixed(2), durMin: retDurM, cumMin: cumMin, eta: fmtMin(cumMin)
+  });
+
+  R = fullRoute;
+  saveRouteToStorage();
+  var km = routeDistKm(optRoute, distMatrix);
+  showResults(R, km, _lastResultSaved, Math.round(routeDurMin(optRoute, durMatrix)));
+  showToast('Ruta reoptimizada con horarios', 'ok');
+}
+
 function confirmRoute() {
-  showToast('¡A entregar! 🚚', 'ok');
+  showToast('\xa1A entregar! 🚚', 'ok');
   document.getElementById('map-sub').textContent = 'Desde ' + DEPOT.name;
   setTimeout(function() { go('scr-map'); }, 1200);
 }
