@@ -937,8 +937,8 @@ async function runOptimization(txt, demoStops) {
   // Snapshot wizDepot immediately — guard against null/NaN from failed GPS or manual mode
   var snapDepot = wizDepot;
   if (!snapDepot || !snapDepot.lat || !snapDepot.lng || isNaN(snapDepot.lat) || isNaN(snapDepot.lng)) {
+    step(0, 'er', 'Punto de partida sin coordenadas — volvé al paso 1');
     showToast('Elegí un punto de partida válido antes de optimizar', 'err');
-    showWS(1);
     return;
   }
   DEPOT = {
@@ -1025,8 +1025,8 @@ async function runOptimization(txt, demoStops) {
   var noCoords   = geocoded.filter(function(s) { return !s.lat || !s.lng; });
 
   if (withCoords.length < 1) {
-    showToast('Sin paradas válidas para optimizar', 'err');
-    showWS(2);
+    step(2, 'er', 'Ninguna parada geocodificada — verificá la ciudad y el formato de direcciones');
+    showToast('No se pudo ubicar ninguna parada. Verificá la ciudad ingresada.', 'err');
     return;
   }
 
