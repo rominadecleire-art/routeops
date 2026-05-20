@@ -590,21 +590,6 @@ function goStep3() {
     showToast('Agregá al menos una parada, subí un PDF o una foto', 'info');
     return;
   }
-  // City is mandatory for PDF and image uploads
-  if (pendingPDF || pendingImages.length) {
-    var cityFieldId = pendingImages.length ? 'extract-city-inp-img' : 'extract-city-inp';
-    var ecInp = document.getElementById(cityFieldId);
-    var ec = ecInp ? ecInp.value.trim() : '';
-    if (!ec) {
-      showToast('Escrib\xed la ciudad de las entregas antes de continuar', 'err');
-      if (ecInp) {
-        ecInp.style.borderColor = '#ef4444';
-        ecInp.focus();
-        ecInp.scrollIntoView({behavior: 'smooth', block: 'center'});
-      }
-      return;
-    }
-  }
   showWS(3);
   runOptimization(txt, null);
 }
