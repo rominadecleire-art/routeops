@@ -1548,10 +1548,18 @@ var AR_PROVINCES = /^(buenos aires|santa fe|c[oó]rdoba|mendoza|tucum[aá]n|salt
 // Handles both standalone "2627" and "CP2627" / "CP 2627" formats.
 function extractPostalCode(addr) {
   if (!addr) return '';
-  var commaIdx = addr.indexOf(',');
-  var searchIn = commaIdx >= 0 ? addr.slice(commaIdx + 1) : addr;
-  var m = searchIn.match(/\bCP\s*(\d{4})\b|\b(\d{4})\b/i);
-  return m ? (m[1] || m[2]) : '';
+  // 1) Prefijo explícito CP#### en cualquier parte de la dirección
+  var cp = addr.match(/\bCP\s*(\d{4})\b/i);
+  if (cp) return cp[1];
+  // 2) Primer segmento antes de la primera coma si es exactamente 4 dígitos
+  //    Cubre el formato "2173, CHABAS" que viene directo del PDF
+  var parts = addr.split(',');
+  var first = parts[0].trim();
+  if (/^\d{4}$/.test(first)) return first;
+  // 3) 4 dígitos en los segmentos restantes (evita confundir con número de calle)
+  var rest = parts.slice(1).join(',');
+  var m = rest.match(/\b(\d{4})\b/);
+  return m ? m[1] : '';
 }
 
 function extractLocality(addr) {
