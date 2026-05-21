@@ -1,8 +1,9 @@
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@500&display=swap');
 
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-body{background:#080808;display:flex;align-items:center;justify-content:center;min-height:100vh;font-family:'DM Sans',sans-serif;padding:20px 0}
-.phone{width:375px;height:812px;background:#111;border-radius:50px;overflow:hidden;position:relative;box-shadow:0 0 0 1.5px #2a2a2a,0 50px 120px rgba(0,0,0,.9);display:flex;flex-direction:column}
+body{background:#080808;display:flex;align-items:center;justify-content:center;height:100vh;overflow:hidden;font-family:'DM Sans',sans-serif;padding:0}
+.phone{width:375px;height:812px;max-height:100vh;background:#111;border-radius:50px;overflow-y:auto;overflow-x:hidden;position:relative;box-shadow:0 0 0 1.5px #2a2a2a,0 50px 120px rgba(0,0,0,.9);display:flex;flex-direction:column}
+.phone::-webkit-scrollbar{display:none}
 .sbar{height:48px;background:#111;display:flex;align-items:center;justify-content:space-between;padding:14px 28px 0;flex-shrink:0}
 .sbar-time{font-size:15px;font-weight:600;color:#fff;font-family:'DM Mono',monospace}
 .si-icons{display:flex;gap:5px;align-items:center}
