@@ -1533,15 +1533,17 @@ var AR_PROVINCES = /^(buenos aires|santa fe|c[oó]rdoba|mendoza|tucum[aá]n|salt
 // Handles both standalone "2627" and "CP2627" / "CP 2627" formats.
 function extractPostalCode(addr) {
   if (!addr) return '';
-  // 1) Prefijo explícito CP#### en cualquier parte de la dirección
+  // 1) Prefijo explícito CP#### en cualquier parte
   var cp = addr.match(/\bCP\s*(\d{4})\b/i);
   if (cp) return cp[1];
-  // 2) Primer segmento antes de la primera coma si es exactamente 4 dígitos
-  //    Cubre el formato "2173, CHABAS" que viene directo del PDF
   var parts = addr.split(',');
   var first = parts[0].trim();
+  // 2) Primer segmento es exactamente 4 dígitos: "2173, CHABAS"
   if (/^\d{4}$/.test(first)) return first;
-  // 3) 4 dígitos en los segmentos restantes (evita confundir con número de calle)
+  // 3) Primer segmento empieza con 4 dígitos seguidos de texto: "2173 CHABAS"
+  var lead = first.match(/^(\d{4})\s+\S/);
+  if (lead) return lead[1];
+  // 4) 4 dígitos en los segmentos siguientes: "Rivadavia 150, 2173 CHABAS"
   var rest = parts.slice(1).join(',');
   var m = rest.match(/\b(\d{4})\b/);
   return m ? m[1] : '';
@@ -1553,12 +1555,17 @@ function extractLocality(addr) {
   for (var i = 1; i < parts.length; i++) {
     var p = parts[i];
     if (!p || p.length < 3) continue;
-    if (/^\d{4,}$/.test(p)) continue;          // postal code
+    if (/^\d{4,}$/.test(p)) continue;
     if (/^argentina$/i.test(p)) continue;
     if (AR_PROVINCES.test(p)) continue;
-    return p.toLowerCase();
+    // Segmento "2173 CHABAS" o "CP2627 Venado Tuerto" → quitar el CP del inicio
+    return p.replace(/^CP\s*\d{4}\s+/i, '').replace(/^\d{4}\s+/, '').trim().toLowerCase();
   }
-  return (parts[0] || '').toLowerCase();
+  // parts[0] puede ser "2173 CHABAS" o "CP2627 Venado Tuerto" (CP + ciudad sin coma separada)
+  var first = (parts[0] || '').trim();
+  var codeCity = first.match(/^\d{4}\s+(.+)$/) || first.match(/^CP\s*\d{4}\s+(.+)$/i);
+  if (codeCity) return codeCity[1].trim().toLowerCase();
+  return first.toLowerCase();
 }
 
 function groupByLocality(withCoords) {
@@ -1641,7 +1648,21 @@ function clusterByPostalCode(withCoords) {
       return;
     }
 
-    // Geo fallback (5 km radius)
+    // Intento extra: extraer ciudad del resolvedAddress de Nominatim
+    var resolvedCity = extractLocality(s.resolvedAddress || '');
+    if (isValidCity(resolvedCity)) {
+      var rKey = 'city:' + resolvedCity;
+      var rc = findByKey(rKey);
+      if (rc) {
+        rc.indices.push(idx);
+        updateCentroid(rc, s.lat, s.lng);
+      } else {
+        clusters.push({key: rKey, name: capitalizeWords(resolvedCity), lat: s.lat || null, lng: s.lng || null, count: 1, indices: [idx]});
+      }
+      return;
+    }
+
+    // Geo fallback: solo agrupa con cluster MISMO ciudad (radio 1 km) para no mezclar pueblos distintos
     if (s.lat && s.lng) {
       var bestC = null, bestD = Infinity;
       clusters.forEach(function(c) {
@@ -1649,7 +1670,7 @@ function clusterByPostalCode(withCoords) {
         var d = hav(s.lat, s.lng, c.lat, c.lng);
         if (d < bestD) { bestD = d; bestC = c; }
       });
-      if (bestC && bestD < GEO_RADIUS_KM) {
+      if (bestC && bestD < 1.0) {
         bestC.indices.push(idx);
         updateCentroid(bestC, s.lat, s.lng);
       } else {
