@@ -2128,6 +2128,8 @@ function reoptimizeWithDeadlines() {
   saveRouteToStorage();
   var km = routeDistKm(optRoute, distMatrix);
   showResults(R, km, _lastResultSaved, Math.round(routeDurMin(optRoute, durMatrix)));
+  drawMap();
+  renderList();
   showToast('Ruta reoptimizada con horarios', 'ok');
 }
 
